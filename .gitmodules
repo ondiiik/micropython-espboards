@@ -42,3 +42,9 @@
 [submodule "lib/pico-sdk"]
 	path = lib/pico-sdk
 	url = https://github.com/raspberrypi/pico-sdk.git
+[submodule "lib/lv_binding"]
+	path = lib/lv_binding
+	url = ssh://git@github.com/ondiiik/lv_binding_micropython.git
+[submodule "lib/lv_bindings"]
+	path = lib/lv_bindings
+	url = git@github.com:ondiiik/lv_binding_micropython.git

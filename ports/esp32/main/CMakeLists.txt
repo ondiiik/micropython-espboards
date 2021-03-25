@@ -68,11 +68,28 @@ set(MICROPY_SOURCE_PORT
     ${PROJECT_DIR}/machine_sdcard.c
 )
 
+
+set(MICROPY_BOARD_DRIVERS_DIR ${MICROPY_BOARD_DIR}/drivers)
+
+if(EXISTS ${MICROPY_BOARD_DRIVERS_DIR})
+    file(GLOB_RECURSE MICROPY_SOURCE_BOARD_DRIVERS ${MICROPY_BOARD_DRIVERS_DIR}/*.c)
+else()
+    set(MICROPY_BOARD_DRIVERS_DIR)
+endif()
+
+set(MICROPY_LVGL_DIR ${MICROPY_DIR}/lib/lv_bindings)
+
+if(EXISTS ${MICROPY_LVGL_DIR}/lvgl.cmake)
+    include(${MICROPY_LVGL_DIR}/lvgl.cmake)
+endif()
+
 set(MICROPY_SOURCE_QSTR
     ${MICROPY_SOURCE_PY}
     ${MICROPY_SOURCE_EXTMOD}
     ${MICROPY_SOURCE_LIB}
     ${MICROPY_SOURCE_PORT}
+    ${MICROPY_SOURCE_BOARD_DRIVERS}
+    ${MICROPY_SOURCE_LVGL}
 )
 
 set(IDF_COMPONENTS
@@ -80,10 +97,12 @@ set(IDF_COMPONENTS
     bootloader_support
     bt
     driver
+    esp-tls
     esp32
     esp_common
     esp_eth
     esp_event
+    esp_http_client
     esp_ringbuf
     esp_rom
     esp_wifi
@@ -94,6 +113,7 @@ set(IDF_COMPONENTS
     mbedtls
     mdns
     newlib
+    nghttp
     nvs_flash
     sdmmc
     soc
@@ -127,10 +147,14 @@ idf_component_register(
         ${MICROPY_SOURCE_LIB}
         ${MICROPY_SOURCE_DRIVERS}
         ${MICROPY_SOURCE_PORT}
+        ${MICROPY_SOURCE_BOARD_DRIVERS}
+        ${MICROPY_SOURCE_LVGL}
     INCLUDE_DIRS
         ${MICROPY_DIR}
         ${MICROPY_PORT_DIR}
         ${MICROPY_BOARD_DIR}
+        ${MICROPY_BOARD_DRIVERS_DIR}
+        ${MICROPY_INCLUDES_LVGL}
         ${CMAKE_BINARY_DIR}
     REQUIRES
         ${IDF_COMPONENTS}
@@ -150,6 +174,7 @@ target_compile_definitions(${MICROPY_TARGET} PUBLIC
     FFCONF_H=\"${MICROPY_OOFATFS_DIR}/ffconf.h\"
     LFS1_NO_MALLOC LFS1_NO_DEBUG LFS1_NO_WARN LFS1_NO_ERROR LFS1_NO_ASSERT
     LFS2_NO_MALLOC LFS2_NO_DEBUG LFS2_NO_WARN LFS2_NO_ERROR LFS2_NO_ASSERT
+    ${MICROPY_DEFINES_LVGL}
 )
 
 # Disable some warnings to keep the build output clean.
