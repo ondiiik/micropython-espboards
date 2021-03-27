@@ -81,7 +81,15 @@ set(MICROPY_LVGL_DIR ${MICROPY_DIR}/lib/lv_bindings)
 
 if(EXISTS ${MICROPY_LVGL_DIR}/lvgl.cmake)
     include(${MICROPY_LVGL_DIR}/lvgl.cmake)
+else()
+    function(lvgl_add_sources)
+    endfunction()
+    
+    function(lvgl_build_sources)
+    endfunction()
 endif()
+
+lvgl_add_sources()
 
 set(MICROPY_SOURCE_QSTR
     ${MICROPY_SOURCE_PY}
@@ -210,6 +218,8 @@ if(IDF_VERSION_MINOR GREATER_EQUAL 2)
     list(APPEND MICROPY_CPP_INC_EXTRA ${IDF_PATH}/components/soc/soc/${IDF_TARGET}/include)
     list(APPEND MICROPY_CPP_INC_EXTRA ${IDF_PATH}/components/soc/soc/include)
 endif()
+
+lvgl_build_sources()
 
 # Include the main MicroPython cmake rules.
 include(${MICROPY_DIR}/py/mkrules.cmake)
