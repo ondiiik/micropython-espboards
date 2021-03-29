@@ -201,10 +201,7 @@ extern const struct _mp_obj_module_t mp_module_onewire;
 
 #if MICROPY_PY_LVGL
 extern const struct _mp_obj_module_t mp_module_lvgl;
-extern const struct _mp_obj_module_t mp_module_espidf;
 extern const struct _mp_obj_module_t mp_module_lvesp32;
-extern const struct _mp_obj_module_t mp_module_rtch;
-extern const struct _mp_obj_module_t mp_module_lodepng;
 
 #define MICROPY_PORT_LVGL_DEF \
     { MP_OBJ_NEW_QSTR(MP_QSTR_lvgl), (mp_obj_t)&mp_module_lvgl }, \
@@ -216,7 +213,6 @@ extern void lv_deinit(void);
 
 #else
 #define MICROPY_PORT_LVGL_DEF
-#error What ?!?!?!?!?!?!
 #endif
 
 
@@ -225,6 +221,7 @@ extern void lv_deinit(void);
 #endif
 
 #if MICROPY_PY_ESPIDF
+extern const struct _mp_obj_module_t mp_module_espidf;
 #define MICROPY_PORT_ESPIDF_DEF { MP_OBJ_NEW_QSTR(MP_QSTR_espidf), (mp_obj_t)&mp_module_espidf },
 #else
 #define MICROPY_PORT_ESPIDF_DEF
@@ -236,6 +233,7 @@ extern void lv_deinit(void);
 #endif
 
 #if MICROPY_PY_LODEPNG
+extern const struct _mp_obj_module_t mp_module_lodepng;
 #define MICROPY_PORT_LODEPNG_DEF { MP_OBJ_NEW_QSTR(MP_QSTR_lodepng), (mp_obj_t)&mp_module_lodepng },
 #else
 #define MICROPY_PORT_LODEPNG_DEF
@@ -247,6 +245,7 @@ extern void lv_deinit(void);
 #endif
 
 #if MICROPY_PY_RTCH
+extern const struct _mp_obj_module_t mp_module_rtch;
 #define MICROPY_PORT_RTCH_DEF { MP_OBJ_NEW_QSTR(MP_QSTR_rtch), (mp_obj_t)&mp_module_rtch },
 #else
 #define MICROPY_PORT_RTCH_DEF
