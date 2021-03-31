@@ -15,11 +15,11 @@ from uasyncio import sleep_ms as asleep_ms
 # Display settings
 _DISP_V_MIN        = const(2400)                       # Minimal power management backlight display voltage in millivolts
 _DISP_V_MAX        = const(3200)                       # Maximal power management backlight display voltage in millivolts
-_DISP_V_RANGE      = const(_DISP_V_MAX - _DISP_V_MIN)  # Difference between minimal and maximal display backlight voltage
+_DISP_BL_FREQ      = const(1000)                       # Display backlight PWM frequency
 _DISP_H_RES        = const(240)                        # Display horizontalresolution in pixels
 _DISP_V_RES        = const(240)                        # Display vertical resolution in pixels
 _DISP_BUFF_SIZE    = const(_DISP_H_RES * 10)           # LVGL display draw buffer size
-_DISP_FADE_STEP    = const(8)                          # Backlight fade in/out step (larger means faster)
+_DISP_FADE_STEP    = const(1)                          # Backlight fade in/out step delay in milliseconds
 
 # Display byte data indexes
 _BD_DISP_BL_LEVEL  = const(0)                          # Index of backlight level
@@ -32,7 +32,7 @@ _BD_PMU_DISPLAY_V  = const(2)                          # Index of display voltag
 _BD_PMU_MAX        = const(3)                          # Count of display byte data items
 
 # Battery management
-_CHARG_CURR        = const(300)                        # Battery charging current in milliampers
+_CHARG_CURR        = const(300)                        # Battery charging current in milliampers (used 1C for 350mAh battery)
 
 # HW
 _I2C_ID            = const(1)
@@ -50,26 +50,25 @@ _PIN_MOTOR         = const(4)
 class Bios:
     def __init__(self, fastboot = False):
         self._i2c    = I2C(_I2C_ID, scl = Pin(_PIN_SCL), sda=Pin(_PIN_SDA))
-        self.pmu     = Pmu(self._i2c)
-        self.motor   = Motor()
-        self.display = Display(self.pmu)
+        self.display = Display()
         ft6x36.lvgl_touch_init()
         self.touch   = ft6x36
         self._init_lvgl()
+        self.pmu     = None
+        self.motor   = None
         self.rtc     = None
         self.bma     = None
-        self.ticker  = None
         if fastboot:
             import _thread
             _thread.start_new_thread(self._init_slow, ())
         else:
             self._init_slow()
     
+    
     def _init_lvgl(self):
         import lvesp32
         
         lv.init()
-        self.ticker       = lvesp32
         disp_buf1         = st7789.lv_disp_buf_t()
         buf1_1            = bytes(_DISP_BUFF_SIZE)
         disp_buf1.init(buf1_1, None, len(buf1_1) // 4)
@@ -88,10 +87,20 @@ class Bios:
         indev_drv.read_cb = ft6x36.touch_driver_read
         indev_drv.register()
     
+    
     def _init_slow(self):
-        self.rtc = pcf8563(self._i2c)
-        bma423.init(self._i2c, irq=True)
-        self.bma = bma423
+        self.pmu              = Pmu(self._i2c)
+        self.motor            = Motor()
+        
+        self.pmu.display_on   = True
+        self.pmu.display_volt = _DISP_V_MAX
+        self.display.percent  = 0
+        
+        self.rtc              = pcf8563(self._i2c)
+        self.bma              = bma423
+        
+        bma423.init(self._i2c, irq = True)
+    
     
     @staticmethod
     def pmu_attach_interrupt(callback):
@@ -99,12 +108,14 @@ class Bios:
         irq.irq(handler = callback, trigger = Pin.IRQ_FALLING)
         return irq
     
+    
     @staticmethod
     def bma_attach_interrupt(callback):
         irq = Pin(_PIN_BMA_ISR, mode = Pin.IN)
         irq.irq(handler = callback, trigger = Pin.IRQ_RISING)
         return irq
-
+    
+    
     @staticmethod
     def rtc_attach_interrupt(rtc_callback):
         irq = Pin(_PIN_RTC_ISR, mode = Pin.IN)
@@ -115,14 +126,12 @@ class Bios:
 
 # display interface
 class Display:
-    def __init__(self, pmu):
+    def __init__(self):
         st7789.lvgl_driver_init()
         self.driver            = st7789
-        self.pmu               = pmu
         self._bdata            = bytearray(_BD_DISP_MAX)
-        self._bl               = Pin(_PIN_BACKLIGHT, Pin.OUT)
+        self._bl               = PWM(Pin(_PIN_BACKLIGHT, Pin.OUT), freq = _DISP_BL_FREQ, duty = 0)
         self.backlight_percent = 0
-        self.pmu.display_on    = True
     
     
     async def afade(self,
@@ -133,10 +142,10 @@ class Display:
             return
         
         for i in rng:
-            self.pmu.display_volt = i
-            await asleep_ms(0)
+            self._bl.duty(i)
+            await asleep_ms(_DISP_FADE_STEP)
         
-        self.pmu.display_volt          = dval
+        self._bl.duty(dval)
         self._bdata[_BD_DISP_BL_LEVEL] = val
     
     
@@ -148,10 +157,10 @@ class Display:
             return
         
         for i in rng:
-            self.pmu.display_volt = i
-            sleep_ms(0)
+            self._bl.duty(i)
+            sleep_ms(_DISP_FADE_STEP)
         
-        self.pmu.display_volt          = dval
+        self._bl.duty(dval)
         self._bdata[_BD_DISP_BL_LEVEL] = val
     
     
@@ -162,12 +171,12 @@ class Display:
         if val == prev:
             return None, None
         
-        dval = _DISP_V_MIN + _DISP_V_RANGE * val  // 100
+        dval = 1023 * val  // 100
         
         if val > prev:
-            rng = range(_DISP_V_MIN + _DISP_V_RANGE * prev // 100, dval, _DISP_FADE_STEP) 
+            rng = range(1023 * prev // 100, dval) 
         if val < prev:
-            rng = reversed(range(dval, _DISP_V_MIN + _DISP_V_RANGE * prev // 100, _DISP_FADE_STEP))
+            rng = reversed(range(dval, 1023 * prev // 100))
          
         return rng, dval
     
@@ -181,7 +190,7 @@ class Display:
     def percent(self, val : int):
         val = min(100, max(0, val))
         self._bdata[_BD_DISP_BL_LEVEL] = val
-        self.pmu.display_volt = val / 1000
+        self._bl.duty(val * 10)
     
     
     def off(self):
