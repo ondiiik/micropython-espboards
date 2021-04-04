@@ -4,5 +4,5 @@
 # Name,   Type, SubType, Offset,  Size, Flags
 nvs,      data, nvs,     0x9000,   0x6000,
 phy_init, data, phy,     0xf000,   0x1000,
-factory,  app,  factory, 0x10000,  0x2B0000,
-vfs,      data, fat,     0x2c0000, 0xD40000,
+factory,  app,  factory, 0x10000,  0x340000,
+vfs,      data, fat,     0x350000, 0xCB0000,
