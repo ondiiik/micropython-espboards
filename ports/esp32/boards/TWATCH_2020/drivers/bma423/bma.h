@@ -74,9 +74,9 @@ float bma423_temperature(bma423_handle_t dev);
 
 void bma423_enableAccel(bma423_handle_t dev);
 
-void bma423_disalbeIrq(bma423_handle_t dev);
+bool bma423_disalbeIrq(bma423_handle_t dev);
 
-void bma423_enableIrq(bma423_handle_t dev);
+bool bma423_enableIrq(bma423_handle_t dev);
 
 void bma423_attachInterrupt(bma423_handle_t dev);
 

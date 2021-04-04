@@ -2,6 +2,28 @@
 #include "esp_log.h"
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
+
+
+#define _DECL_MDEV(...) \
+    if (dev == NULL) \
+    { \
+        return __VA_ARGS__; \
+    } \
+    \
+    bma423_dev_t* mdev = (bma423_dev_t *)dev; \
+    \
+    if (!mdev->initDone) \
+    { \
+        return __VA_ARGS__; \
+    }
+
+
+#define _DO_OR_DIE(_op_, ...) \
+    if (BMA4_OK != _op_) \
+    { \
+        return __VA_ARGS__; \
+    }
 
 
 static const char *TAG = "[BMA423]";
@@ -178,63 +200,77 @@ bool bma423_reinit(bma423_handle_t dev)
 
 uint8_t bma423_direction(bma423_handle_t dev)
 {
-    if (dev == NULL)return 0;
-    bma423_dev_t *mdev = (bma423_dev_t *)dev;
-
-    if (!mdev->initDone)return 0;
-
+    _DECL_MDEV(0)
+    
     Accel acc;
     if (bma4_read_accel_xyz(&acc, &mdev->handle) != BMA4_OK) {
         return 0;
     }
+    
     uint16_t absX = abs(acc.x);
     uint16_t absY = abs(acc.y);
     uint16_t absZ = abs(acc.z);
 
-    if ((absZ > absX) && (absZ > absY)) {
-        if (acc.z > 0) {
+    if ((absZ > absX) && (absZ > absY))
+    {
+        if (acc.z > 0)
+        {
             return  DIRECTION_DISP_DOWN;
-        } else {
+        }
+        else
+        {
             return DIRECTION_DISP_UP;
         }
-    } else if ((absY > absX) && (absY > absZ)) {
-        if (acc.y > 0) {
+    }
+    else if ((absY > absX) && (absY > absZ))
+    {
+        if (acc.y > 0)
+        {
             return DIRECTION_BOTTOM_EDGE;
-        } else {
+        } else
+        {
             return  DIRECTION_TOP_EDGE;
         }
-    } else {
-        if (acc.x < 0) {
+    }
+    else
+    {
+        if (acc.x < 0)
+        {
             return  DIRECTION_RIGHT_EDGE;
-        } else {
+        }
+        else
+        {
             return DIRECTION_LEFT_EDGE;
         }
     }
 }
 
+
 float bma423_temperature(bma423_handle_t dev)
 {
-    if (dev == NULL)return 0;
-    bma423_dev_t *mdev = (bma423_dev_t *)dev;
-    if (!mdev->initDone)return 0;
-    int32_t data = 0;
-    uint16_t rslt = bma4_get_temperature(&data, BMA4_DEG, &mdev->handle);
-    if (rslt != BMA4_OK) return 0;
+    _DECL_MDEV(NAN)
+    
+    int32_t  data = 0;
+    
+    _DO_OR_DIE(bma4_get_temperature(&data, BMA4_DEG, &mdev->handle), NAN)
+    
     float res = (float)data / (float)BMA4_SCALE_TEMP;
     /* 0x80 - temp read from the register and 23 is the ambient temp added.
      * If the temp read from register is 0x80, it means no valid
      * information is available */
-    if (((data - 23) / BMA4_SCALE_TEMP) == 0x80) {
-        res = 0;
+    if (((data - 23) / BMA4_SCALE_TEMP) == 0x80)
+    {
+        res = NAN;
     }
+    
     return res;
 }
 
+
 void bma423_enableAccel(bma423_handle_t dev)
 {
-    if (dev == NULL)return;
-    bma423_dev_t *mdev = (bma423_dev_t *)dev;
-    if (!mdev->initDone)return;
+    _DECL_MDEV( )
+    
     if (bma4_set_accel_enable(BMA4_ENABLE, &mdev->handle)) {
         return;
     }
@@ -249,28 +285,23 @@ void bma423_enableAccel(bma423_handle_t dev)
     }
 }
 
-void bma423_disalbeIrq(bma423_handle_t dev)
+bool bma423_disalbeIrq(bma423_handle_t dev)
 {
-    if (dev == NULL)return;
-    bma423_dev_t *mdev = (bma423_dev_t *)dev;
-    if (!mdev->initDone)return ;
-    bma423_map_interrupt(BMA4_INTR1_MAP, BMA423_STEP_CNTR_INT /* |BMA423_WAKEUP_INT*/, BMA4_DISABLE, &mdev->handle);
+    _DECL_MDEV( )
+    return BMA4_OK == bma423_map_interrupt(BMA4_INTR1_MAP, BMA423_STEP_CNTR_INT /* |BMA423_WAKEUP_INT*/, BMA4_DISABLE, &mdev->handle);
 }
 
-void bma423_enableIrq(bma423_handle_t dev)
+bool bma423_enableIrq(bma423_handle_t dev)
 {
-    if (dev == NULL)return;
-    bma423_dev_t *mdev = (bma423_dev_t *)dev;
-    if (!mdev->initDone)return ;
-    bma423_map_interrupt(BMA4_INTR1_MAP, BMA423_STEP_CNTR_INT /* |BMA423_WAKEUP_INT*/, BMA4_ENABLE, &mdev->handle);
+    _DECL_MDEV( )
+    return BMA4_OK == bma423_map_interrupt(BMA4_INTR1_MAP, BMA423_STEP_CNTR_INT /* |BMA423_WAKEUP_INT*/, BMA4_ENABLE, &mdev->handle);
 }
 
 //attachInterrupt bma423 int1
 void bma423_attachInterrupt(bma423_handle_t dev)
 {
-    if (dev == NULL)return;
-    bma423_dev_t *mdev = (bma423_dev_t *)dev;
-    if (!mdev->initDone)return;
+    _DECL_MDEV( )
+    
     uint16_t rslt = BMA4_OK;
     bma423_enableAccel(dev);
     // rslt |= bma423_reset_step_counter(&mdev->handle);
@@ -295,17 +326,13 @@ void bma423_attachInterrupt(bma423_handle_t dev)
 
 bool bma423_readInterrupt(bma423_handle_t dev)
 {
-    if (dev == NULL)return 0;
-    bma423_dev_t *mdev = (bma423_dev_t *)dev;
-    if (!mdev->initDone)return false;
+    _DECL_MDEV(false)
     return bma423_read_int_status(&mdev->status, &mdev->handle) == BMA4_OK;
 }
 
 uint32_t bma423_getCounter(bma423_handle_t dev)
 {
-    if (dev == NULL)return 0;
-    bma423_dev_t *mdev = (bma423_dev_t *)dev;
-    if (!mdev->initDone)return 0;
+    _DECL_MDEV(0)
     uint32_t stepCount;
     if (bma423_step_counter_output(&stepCount, &mdev->handle) == BMA4_OK) {
         return stepCount;
@@ -315,24 +342,18 @@ uint32_t bma423_getCounter(bma423_handle_t dev)
 
 bool bma423_clearCounter(bma423_handle_t dev)
 {
-    if (dev == NULL)return 0;
-    bma423_dev_t *mdev = (bma423_dev_t *)dev;
-    if (!mdev->initDone)return 0;
+    _DECL_MDEV(false)
     return bma423_reset_step_counter(&mdev->handle) == BMA4_OK;
 }
 
 bool bma423_isStepCounter(bma423_handle_t dev)
 {
-    if (dev == NULL)return false;
-    bma423_dev_t *mdev = (bma423_dev_t *)dev;
-    if (!mdev->initDone)return false;
+    _DECL_MDEV(false)
     return (bool)(BMA423_STEP_CNTR_INT & mdev->status);
 }
 
 bool bma423_isDoubleClick(bma423_handle_t dev)
 {
-    if (dev == NULL)return false;
-    bma423_dev_t *mdev = (bma423_dev_t *)dev;
-    if (!mdev->initDone)return false;
+    _DECL_MDEV(false)
     return (bool)(BMA423_WAKEUP_INT & mdev->status);
 }

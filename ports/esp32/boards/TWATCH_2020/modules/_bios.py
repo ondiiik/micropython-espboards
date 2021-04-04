@@ -24,11 +24,16 @@ _DISP_V_RES        = const(240)                        # Display vertical resolu
 _DISP_BUFF_SIZE    = const(_DISP_H_RES * 10)           # LVGL display draw buffer size
 _DISP_FADE_STEP    = const(1)                          # Backlight fade in/out step delay in milliseconds
 
-# Power management unit byte data indexes
-_BD_PMU_AUDIO_ON   = const(0)                          # Index of audio on status
-_BD_PMU_DISPLAY_ON = const(1)                          # Index of display on status
-_BD_PMU_DISPLAY_V  = const(2)                          # Index of display voltage in millivolts divided by 100
-_BD_PMU_MAX        = const(3)                          # Count of display byte data items
+# Power management unit bytes module indexes
+_BM_PMU_AUDIO_ON   = const(0)                          # Index of audio on status
+_BM_PMU_DISPLAY_ON = const(1)                          # Index of display on status
+_BM_PMU_DISPLAY_V  = const(2)                          # Index of display voltage in millivolts divided by 100
+_BM_PMU_MAX        = const(3)                          # Count of display byte data items
+
+# IMU unit bytes module indexes
+_BM_IMU_TAPTAP     = const(0)
+_BM_IMU_STEPPER    = const(1)
+_BM_IMU_MAX        = const(2)
 
 # Battery management
 _CHARG_CURR        = const(300)                        # Battery charging current in milliampers (used 1C for 350mAh battery)
@@ -74,7 +79,7 @@ class Bios:
         self.pmu     = None
         self.motor   = None
         self.rtc     = None
-        self.bma     = None
+        self._drv     = None
         if fastboot:
             import _thread
             _thread.start_new_thread(self._init_slow, ())
@@ -106,17 +111,15 @@ class Bios:
     
     
     def _init_slow(self):
-        self.pmu              = Pmu(self._i2c)
-        self.motor            = Motor()
+        self.pmu                = Pmu(self._i2c)
+        self.motor              = Motor()
         
-        self.pmu.display_on   = True
-        self.pmu.display_volt = _DISP_V_MAX
-        self.display.brightness  = 0
+        self.pmu.display_on     = True
+        self.pmu.display_volt   = _DISP_V_MAX
+        self.display.brightness = 0
         
-        self.rtc              = pcf8563(self._i2c)
-        self.bma              = bma423
-        
-        bma423.init(self._i2c, irq = True)
+        self.rtc                = pcf8563(self._i2c)
+        self.imu                = Imu(self._i2c)
     
     
     @staticmethod
@@ -145,14 +148,14 @@ class Bios:
 class Display:
     def __init__(self):
         st7789.lvgl_driver_init()
-        self.driver            = st7789
-        self._brightness       = 0
-        self._backlight        = PWM(Pin(_PIN_BACKLIGHT, Pin.OUT), freq = _DISP_BL_FREQ, duty = 0)
+        self._drv        = st7789
+        self._brightness = 0
+        self._backlight  = PWM(Pin(_PIN_BACKLIGHT, Pin.OUT), freq = _DISP_BL_FREQ, duty = 0)
     
     
     async def afade(self,
                     v : float):
-        rng, dval, val = self._blf_range(v)
+        rng, dval = self._blf_range(v)
         
         if rng is None:
             return
@@ -162,12 +165,11 @@ class Display:
             await asleep_ms(_DISP_FADE_STEP)
         
         self._backlight.duty(dval)
-        self._brightness = val
     
     
     def fade(self,
              v : float):
-        rng, dval, val = self._blf_range(v)
+        rng, dval = self._blf_range(v)
         
         if rng is None:
             return
@@ -177,24 +179,23 @@ class Display:
             sleep_ms(_DISP_FADE_STEP)
         
         self._backlight.duty(dval)
-        self._brightness = val
     
     
-    def _blf_range(self, val):
-        val  = min(1, max(0, val))
+    def _blf_range(self, v):
+        val  = min(1, max(0, v))
         dval = int(1023 * val)
         prev = int(1023 * self._brightness)
         
         if dval == prev:
             return None, None, None
         
-        print(prev, dval, self._brightness, val)
-        if val > prev:
+        if dval > prev:
             rng = range(prev, dval) 
-        if val < prev:
+        if dval < prev:
             rng = reversed(range(dval, prev))
-         
-        return rng, dval, val
+        
+        self._brightness = val
+        return rng, dval
     
     
     @property
@@ -210,91 +211,95 @@ class Display:
     
     
     def off(self):
-        self.driver.st7789_send_cmd(0x10)
+        self._drv.st7789_send_cmd(0x10)
 
     def sleep(self):
-        self.driver.st7789_send_cmd(0x10)
+        self._drv.st7789_send_cmd(0x10)
 
     def wakeup(self):
-        self.driver.st7789_send_cmd(0x11)
+        self._drv.st7789_send_cmd(0x11)
 
 
 
 # PMU interface
 class Pmu:
     def __init__(self, i2c):
-        self.driver = axp202.PMU(i2c)
-        self._bdata = bytearray(_BD_PMU_MAX)
+        self._drv = axp202.PMU(i2c)
+        self._bm  = bytearray(_BM_PMU_MAX)
         
-        self.driver.setShutdownTime(axp202.AXP_POWER_OFF_TIME_4S)
-        self.driver.setChgLEDMode(axp202.AXP20X_LED_OFF)
-        self.driver.setPowerOutPut(axp202.AXP202_EXTEN, False)
-        self.driver.setChargeControlCur(_CHARG_CURR)
+        self._drv.setShutdownTime(axp202.AXP_POWER_OFF_TIME_4S)
+        self._drv.setChgLEDMode(axp202.AXP20X_LED_OFF)
+        self._drv.setPowerOutPut(axp202.AXP202_EXTEN, False)
+        self._drv.setChargeControlCur(_CHARG_CURR)
     
     
     def power_off(self):
-        self.driver.setPowerOutPut(axp202.AXP202_EXTEN, False)
-        self.driver.setPowerOutPut(axp202.AXP202_LDO4,  False)
-        self.driver.setPowerOutPut(axp202.AXP202_DCDC2, False)
+        self._drv.setPowerOutPut(axp202.AXP202_EXTEN, False)
+        self._drv.setPowerOutPut(axp202.AXP202_LDO4,  False)
+        self._drv.setPowerOutPut(axp202.AXP202_DCDC2, False)
         self.audio_on   = False
         self.display_on = False
     
     
     @property
     def audio_on(self) -> bool:
-        return bool(self._bdata[_BD_PMU_AUDIO_ON])
+        return bool(self._bm[_BM_PMU_AUDIO_ON])
     
     
     @audio_on.setter
     def audio_on(self,
                  val : bool):
-        self._bdata[_BD_PMU_AUDIO_ON] = int(val)
-        self.driver.setLDO3Mode(1)
-        self.driver.setPowerOutPut(axp202.AXP202_LDO3, val)
+        self._bm[_BM_PMU_AUDIO_ON] = int(val)
+        self._drv.setLDO3Mode(1)
+        self._drv.setPowerOutPut(axp202.AXP202_LDO3, val)
     
     
     @property
     def display_on(self) -> bool:
-        return bool(self._bdata[_BD_PMU_DISPLAY_ON])
+        return bool(self._bm[_BM_PMU_DISPLAY_ON])
     
     
     @display_on.setter
     def display_on(self,
                    val : bool):
-        self._bdata[_BD_PMU_DISPLAY_ON] = int(val)
-        self.driver.setPowerOutPut(axp202.AXP202_LDO2, val)
+        self._bm[_BM_PMU_DISPLAY_ON] = int(val)
+        self._drv.setPowerOutPut(axp202.AXP202_LDO2, val)
     
     
     @property
     def display_volt(self) -> float:
-        return bool(self._bdata[_BD_PMU_DISPLAY_V] * 100)
+        return bool(self._bm[_BM_PMU_DISPLAY_V] * 100)
     
     
     @display_volt.setter
     def display_volt(self,
                      val : float):
         nv = int(val // 100)
-        self._bdata[_BD_PMU_DISPLAY_V] = nv
-        self.driver.setLDO2Voltage(min(_DISP_V_MAX, max(_DISP_V_MIN, nv * 100)))
+        self._bm[_BM_PMU_DISPLAY_V] = nv
+        self._drv.setLDO2Voltage(min(_DISP_V_MAX, max(_DISP_V_MIN, nv * 100)))
 
 
 
 # Motor interface
 class Motor:
     def __init__(self):
-        self.pwm = PWM(Pin(_PIN_MOTOR, Pin.OUT), freq = 1000, duty = 0)
-
+        self._drv = PWM(Pin(_PIN_MOTOR, Pin.OUT), freq = 1000, duty = 0)
+    
+    
     def on(self):
-        self.pwm.duty(5)
-
+        self._drv.duty(5)
+    
+    
     def off(self):
-        self.pwm.duty(0)
-
+        self._drv.duty(0)
+    
+    
     def set_strength(self, strength):
-        self.pwm.duty(5 * strength / 100)
-
+        self._drv.duty(5 * strength / 100)
+    
+    
     def set_freq(self, freq):
-        self.pwm.freq(freq)
+        self._drv.freq(freq)
 
 
 
@@ -384,6 +389,83 @@ class Audio:
                                 dmalen        = _I2S_DMA_LEN)
         
         return audio, (8000 * size) // (rate * channels * bits)
+
+
+
+class Imu:
+    DIRECTION_TOP_EDGE    = bma423.DIRECTION_TOP_EDGE
+    DIRECTION_BOTTOM_EDGE = bma423.DIRECTION_BOTTOM_EDGE
+    DIRECTION_LEFT_EDGE   = bma423.DIRECTION_LEFT_EDGE
+    DIRECTION_RIGHT_EDGE  = bma423.DIRECTION_RIGHT_EDGE
+    DIRECTION_DISP_UP     = bma423.DIRECTION_DISP_UP
+    DIRECTION_DISP_DOWN   = bma423.DIRECTION_DISP_DOWN
+    
+    
+    def __init__(self, i2c):
+        self._drv = bma423
+        self._bm  = bytearray(_BM_IMU_MAX)
+        bma423.init(i2c, irq = True)
+    
+    
+    @property
+    def accel(self):
+        return self._drv.accel()
+    
+    
+    @property
+    def direction(self):
+        return self._drv.accel()
+    
+    
+    @property
+    def temp(self):
+        return self._drv.temp()
+    
+    
+    @property
+    def steps(self):
+        return self._drv.step_count()
+    
+    
+    def reset(self):
+        self._drv.step_reset()
+    
+    
+    def wait_taptap(self):
+        while not self._test(_BM_IMU_TAPTAP):
+            sleep_ms(10)
+    
+    
+    async def await_taptap(self):
+        while not self._test(_BM_IMU_TAPTAP):
+            await asleep_ms(10)
+    
+    
+    def wait_step(self):
+        while not self._test(_BM_IMU_STEPPER):
+            sleep_ms(10)
+        
+        return self._drv.step_count()
+    
+    
+    async def await_step(self):
+        while not self._test(_BM_IMU_STEPPER):
+            await asleep_ms(10)
+        
+        return self._drv.step_count()
+    
+    
+    def _test(self, flag):
+        v = bios.imu._drv.irq_read()
+        
+        if   v == bios.imu._drv.IRQ_DOUBLE_WAKEUP:
+            self._bm[_BM_IMU_TAPTAP]  = 1
+        elif v == bios.imu._drv.IRQ_STEP_COUNTER:
+            self._bm[_BM_IMU_STEPPER] = 1
+        
+        v = self._bm[flag]
+        self._bm[flag] = 0
+        return v
 
 
 
