@@ -18,15 +18,11 @@ from ustruct  import             unpack
 # Display settings
 _DISP_V_MIN        = const(2400)                       # Minimal power management backlight display voltage in millivolts
 _DISP_V_MAX        = const(3200)                       # Maximal power management backlight display voltage in millivolts
-_DISP_BL_FREQ      = const(1000)                       # Display backlight PWM frequency
+_DISP_BL_FREQ      = const(120)                        # Display backlight PWM frequency
 _DISP_H_RES        = const(240)                        # Display horizontalresolution in pixels
 _DISP_V_RES        = const(240)                        # Display vertical resolution in pixels
 _DISP_BUFF_SIZE    = const(_DISP_H_RES * 10)           # LVGL display draw buffer size
 _DISP_FADE_STEP    = const(1)                          # Backlight fade in/out step delay in milliseconds
-
-# Display byte data indexes
-_BD_DISP_BL_LEVEL  = const(0)                          # Index of backlight level
-_BD_DISP_MAX       = const(1)                          # Count of display byte data items
 
 # Power management unit byte data indexes
 _BD_PMU_AUDIO_ON   = const(0)                          # Index of audio on status
@@ -115,7 +111,7 @@ class Bios:
         
         self.pmu.display_on   = True
         self.pmu.display_volt = _DISP_V_MAX
-        self.display.percent  = 0
+        self.display.brightness  = 0
         
         self.rtc              = pcf8563(self._i2c)
         self.bma              = bma423
@@ -150,68 +146,67 @@ class Display:
     def __init__(self):
         st7789.lvgl_driver_init()
         self.driver            = st7789
-        self._bdata            = bytearray(_BD_DISP_MAX)
-        self._bl               = PWM(Pin(_PIN_BACKLIGHT, Pin.OUT), freq = _DISP_BL_FREQ, duty = 0)
-        self.backlight_percent = 0
+        self._brightness       = 0
+        self._backlight        = PWM(Pin(_PIN_BACKLIGHT, Pin.OUT), freq = _DISP_BL_FREQ, duty = 0)
     
     
     async def afade(self,
-                    val : int):
-        rng, dval = self._blf_range(val)
+                    v : float):
+        rng, dval, val = self._blf_range(v)
         
         if rng is None:
             return
         
         for i in rng:
-            self._bl.duty(i)
+            self._backlight.duty(i)
             await asleep_ms(_DISP_FADE_STEP)
         
-        self._bl.duty(dval)
-        self._bdata[_BD_DISP_BL_LEVEL] = val
+        self._backlight.duty(dval)
+        self._brightness = val
     
     
     def fade(self,
-             val : int):
-        rng, dval = self._blf_range(val)
+             v : float):
+        rng, dval, val = self._blf_range(v)
         
         if rng is None:
             return
         
         for i in rng:
-            self._bl.duty(i)
+            self._backlight.duty(i)
             sleep_ms(_DISP_FADE_STEP)
         
-        self._bl.duty(dval)
-        self._bdata[_BD_DISP_BL_LEVEL] = val
+        self._backlight.duty(dval)
+        self._brightness = val
     
     
     def _blf_range(self, val):
-        val  = min(100, max(0, val))
-        prev = self._bdata[_BD_DISP_BL_LEVEL]
+        val  = min(1, max(0, val))
+        dval = int(1023 * val)
+        prev = int(1023 * self._brightness)
         
-        if val == prev:
-            return None, None
+        if dval == prev:
+            return None, None, None
         
-        dval = 1023 * val  // 100
-        
+        print(prev, dval, self._brightness, val)
         if val > prev:
-            rng = range(1023 * prev // 100, dval) 
+            rng = range(prev, dval) 
         if val < prev:
-            rng = reversed(range(dval, 1023 * prev // 100))
+            rng = reversed(range(dval, prev))
          
-        return rng, dval
+        return rng, dval, val
     
     
     @property
-    def percent(self) -> int:
-        return self._bdata[_BD_DISP_BL_LEVEL]
+    def brightness(self) -> float:
+        return self._brightness
     
     
-    @percent.setter
-    def percent(self, val : int):
-        val = min(100, max(0, val))
-        self._bdata[_BD_DISP_BL_LEVEL] = val
-        self._bl.duty(val * 10)
+    @brightness.setter
+    def brightness(self, val : float):
+        val = min(1, max(0, val))
+        self._brightness = val
+        self._backlight.duty(int(1023 * val))
     
     
     def off(self):
