@@ -7,8 +7,11 @@ import                           ft6x36
 import                           bma423
 from pcf8563  import PCF8563  as pcf8563
 from machine  import             Pin, I2C, PWM
-from time     import             sleep_ms
+from time     import             sleep_ms, ticks_ms
 from uasyncio import sleep_ms as asleep_ms
+from i2s      import             I2S
+from ustruct  import             unpack
+
 
 
 
@@ -43,6 +46,23 @@ _PIN_BMA_ISR       = const(39)
 _PIN_RTC_ISR       = const(37)
 _PIN_BACKLIGHT     = const(12)
 _PIN_MOTOR         = const(4)
+_PIN_BCK           = const(26) 
+_PIN_WS            = const(25)  
+_PIN_SDOUT         = const(33)
+
+# WAV decoder
+_wav_fmt           = '<IIIIIHHIIHHII'
+_WAV_RIFF          = const(0x46464952)
+_WAV_WAVE          = const(0x45564157)
+_WAV_FMT           = const(0x20746D66)
+_WAV_DATA          = const(0x61746164)
+_WAV_BUFSIZE       = const(1024)
+_I2S_DMA_LEN       = const(512)
+_I2S_DMA_CNT       = const(10)
+_I2S_OVERLAP       = const(200)
+
+
+
 
 
 
@@ -54,6 +74,7 @@ class Bios:
         ft6x36.lvgl_touch_init()
         self.touch   = ft6x36
         self._init_lvgl()
+        self.audio   = Audio()
         self.pmu     = None
         self.motor   = None
         self.rtc     = None
@@ -279,6 +300,96 @@ class Motor:
 
     def set_freq(self, freq):
         self.pwm.freq(freq)
+
+
+
+# Audio interface
+class Audio:
+    def __init__(self):
+        self._bck    = Pin(_PIN_BCK)
+        self._ws     = Pin(_PIN_WS)  
+        self._sdout  = Pin(_PIN_SDOUT)
+    
+    
+    def play_wav(self,
+                 file : str):
+        with open(file, 'rb') as wav:
+            audio, ms = self._init_wav(wav)
+            buff      = memoryview(bytearray(_WAV_BUFSIZE))
+            cnt       = 1
+            end       = ms + _I2S_OVERLAP + ticks_ms()
+            
+            while cnt > 0:
+                cnt     = wav.readinto(buff)
+                written = 0
+                
+                while written < cnt:
+                    written += audio.write(buff[written:cnt], timeout = 0)
+            
+        sleep_ms(max(0, end - ticks_ms()))
+        audio.deinit()
+        bios.pmu.audio_on = False
+    
+    
+    async def aplay_wav(self,
+                        file : str):
+        with open(file, 'rb') as wav:
+            audio, ms = self._init_wav(wav)
+            buff      = memoryview(bytearray(_WAV_BUFSIZE))
+            cnt       = 1
+            end       = ms + _I2S_OVERLAP + ticks_ms()
+            
+            while cnt > 0:
+                cnt     = wav.readinto(buff)
+                written = 0
+                
+                while written < cnt:
+                    written += audio.write(buff[written:cnt], timeout = 0)
+                    await asleep_ms(0)
+            
+        await asleep_ms(max(0, end - ticks_ms()))
+        audio.deinit()
+        bios.pmu.audio_on = False
+    
+    
+    def _init_wav(self, wav):
+        header = wav.read(44)
+        riff, \
+        _, \
+        wave, \
+        fmt, \
+        _, _, \
+        channels, \
+        rate, \
+        _, _, \
+        bits, \
+        data, \
+        size = unpack(_wav_fmt, header)
+        
+        if (not _WAV_WAVE == wave) or \
+           (not _WAV_RIFF == riff) or \
+           (not _WAV_FMT  == fmt)  or \
+           (not _WAV_DATA == data):
+            raise ValueError('Invalid WAV signature')
+        
+        if not bits == 16:
+            raise ValueError('Only 16 bit WAV supported')
+        
+        bios.pmu.audio_on = True
+        audio             = I2S(I2S.NUM0, 
+                                bck           = self._bck,
+                                ws            = self._ws,
+                                sdout         = self._sdout, 
+                                standard      = I2S.PHILIPS, 
+                                mode          = I2S.MASTER_TX,
+                                dataformat    = I2S.B16,
+                                channelformat = I2S.ONLY_LEFT,
+                                samplerate    = rate,
+                                dmacount      = _I2S_DMA_CNT,
+                                dmalen        = _I2S_DMA_LEN)
+        
+        return audio, (8000 * size) // (rate * channels * bits)
+
 
 
 

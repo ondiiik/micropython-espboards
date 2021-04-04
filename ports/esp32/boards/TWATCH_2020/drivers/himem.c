@@ -194,7 +194,7 @@ STATIC mp_obj_t himem_init(void)
     if (0 == size)
     {
         _fs_size   = esp_himem_get_free_size();
-        _block_cnt = size / _block_size;
+        _block_cnt = _fs_size / _block_size;
         
         ESPY__DO_OR_DIE(esp_himem_alloc(_fs_size, &_himem),                  MemoryError);
         ESPY__DO_OR_DIE(esp_himem_alloc_map_range(ESP_HIMEM_BLKSZ, &_range), MemoryError);
