@@ -1,16 +1,18 @@
 # Board bios module for TWatch 2020 by Ondrej Sienczak (OSi)
 # See https://github.com/ondiiik/micropython-twatch-2020 for more
-import                           axp202
-import lvgl                   as lv
-import st7789_lvgl            as st7789
-import                           ft6x36
-import                           bma423
-from pcf8563  import PCF8563  as pcf8563
-from machine  import             Pin, I2C, PWM
-from time     import             sleep_ms, ticks_ms
-from uasyncio import sleep_ms as asleep_ms
-from i2s      import             I2S
-from ustruct  import             unpack
+import                               axp202
+import lvgl                       as lv
+import                               lvesp32
+import st7789_lvgl                as st7789
+import                               ft6x36
+from   imagetools import             get_png_info, open_png
+import                               bma423
+from pcf8563      import PCF8563  as pcf8563
+from machine      import             Pin, I2C, PWM, freq
+from time         import             sleep_ms, ticks_ms
+from uasyncio     import sleep_ms as asleep_ms
+from i2s          import             I2S
+from ustruct      import             unpack
 
 
 
@@ -18,6 +20,7 @@ from ustruct  import             unpack
 # Display settings
 _DISP_V_MIN        = const(2400)                       # Minimal power management backlight display voltage in millivolts
 _DISP_V_MAX        = const(3200)                       # Maximal power management backlight display voltage in millivolts
+_DISP_V_RNG        = const(_DISP_V_MAX - _DISP_V_MIN)  # Display voltage range
 _DISP_BL_FREQ      = const(120)                        # Display backlight PWM frequency
 _DISP_H_RES        = const(240)                        # Display horizontalresolution in pixels
 _DISP_V_RES        = const(240)                        # Display vertical resolution in pixels
@@ -65,61 +68,27 @@ _I2S_OVERLAP       = const(200)
 
 
 
-
-
 # Board bios class
 class Bios:
-    def __init__(self, fastboot = False):
-        self._i2c    = I2C(_I2C_ID, scl = Pin(_PIN_SCL), sda=Pin(_PIN_SDA))
-        self.display = Display()
-        ft6x36.lvgl_touch_init()
-        self.touch   = ft6x36
-        self._init_lvgl()
-        self.audio   = Audio()
-        self.pmu     = None
-        self.motor   = None
-        self.rtc     = None
-        self._drv     = None
-        if fastboot:
-            import _thread
-            _thread.start_new_thread(self._init_slow, ())
-        else:
-            self._init_slow()
-    
-    
-    def _init_lvgl(self):
-        import lvesp32
+    def __init__(self):
+        # Initialize power management unit first
+        i2c      = I2C(_I2C_ID, scl = Pin(_PIN_SCL), sda=Pin(_PIN_SDA))
+        self.pmu = Pmu(i2c)
         
-        lv.init()
-        disp_buf1         = st7789.lv_disp_buf_t()
-        buf1_1            = bytes(_DISP_BUFF_SIZE)
-        disp_buf1.init(buf1_1, None, len(buf1_1) // 4)
+        # Run motor for short time to notify that bios
+        # is starting up
+        self.motor = Motor()
+        self.motor.on()
+        sleep_ms(50)
+        self.motor.off()
         
-        disp_drv          = st7789.lv_disp_drv_t()
-        disp_drv.init()
-        disp_drv.buffer   = disp_buf1
-        disp_drv.flush_cb = st7789.driver_flush
-        disp_drv.hor_res  = _DISP_H_RES
-        disp_drv.ver_res  = _DISP_V_RES
-        disp_drv.register()
-        
-        indev_drv         = ft6x36.lv_indev_drv_t()
-        indev_drv.init()
-        indev_drv.type    = lv.INDEV_TYPE.POINTER
-        indev_drv.read_cb = ft6x36.touch_driver_read
-        indev_drv.register()
-    
-    
-    def _init_slow(self):
-        self.pmu                = Pmu(self._i2c)
-        self.motor              = Motor()
-        
-        self.pmu.display_on     = True
-        self.pmu.display_volt   = _DISP_V_MAX
-        self.display.brightness = 0
-        
-        self.rtc                = pcf8563(self._i2c)
-        self.imu                = Imu(self._i2c)
+        # Once PMU is initialized - switch off display back-light
+        # power and initialize graphics and other peripherials
+        self.pmu.display_on = False
+        self.display        = Display(self.pmu)
+        self.audio          = Audio()
+        self.rtc            = pcf8563(i2c)
+        self.imu            = Imu(i2c)
     
     
     @staticmethod
@@ -146,11 +115,70 @@ class Bios:
 
 # display interface
 class Display:
-    def __init__(self):
-        st7789.lvgl_driver_init()
-        self._drv        = st7789
+    def __init__(self, pmu):
         self._brightness = 0
         self._backlight  = PWM(Pin(_PIN_BACKLIGHT, Pin.OUT), freq = _DISP_BL_FREQ, duty = 0)
+        self.disp        = None
+        self.indev       = None
+        
+        # Initilaize LVGL first
+        lv.init()
+        
+        
+        # Initializes display
+        st7789.lvgl_driver_init()
+        
+        disp_buf1         = st7789.lv_disp_buf_t()
+        buf1_1            = bytes(_DISP_BUFF_SIZE)
+        disp_buf1.init(buf1_1, None, len(buf1_1) // 4)
+        
+        disp_drv          = st7789.lv_disp_drv_t()
+        disp_drv.init()
+        disp_drv.buffer   = disp_buf1
+        disp_drv.flush_cb = st7789.driver_flush
+        disp_drv.hor_res  = _DISP_H_RES
+        disp_drv.ver_res  = _DISP_V_RES
+        
+        self.disp         = disp_drv.register()
+        
+        
+        # inmitializes touch screen
+        ft6x36.lvgl_touch_init()
+        
+        indev_drv         = ft6x36.lv_indev_drv_t()
+        indev_drv.init()
+        indev_drv.type    = lv.INDEV_TYPE.POINTER
+        indev_drv.read_cb = ft6x36.touch_driver_read
+        
+        self.indev        =  indev_drv.register()
+        
+        
+        # And load splash-screen if there is some found
+        self.brightness    = 0
+        pmu.display_power  = 1
+        pmu.display_on     = True
+        
+        try:
+            with open('splash.png' ,'rb') as f:
+                decoder         = lv.img.decoder_create()
+                decoder.info_cb = get_png_info
+                decoder.open_cb = open_png
+                
+                png_data        = f.read()
+                png_img_dsc     = lv.img_dsc_t( { 'data_size': len(png_data),
+                                                  'data'     : png_data } )
+                
+                scr  = lv.obj()
+                img  = lv.img(scr)
+                img.align(scr, lv.ALIGN.IN_TOP_LEFT, 0, 0)
+                img.set_src(png_img_dsc)
+                
+                lv.scr_load(scr)
+                
+                self.fade(0.1)
+        except:
+            self.brightness = 0.1
+    
     
     
     async def afade(self,
@@ -211,13 +239,13 @@ class Display:
     
     
     def off(self):
-        self._drv.st7789_send_cmd(0x10)
-
+        st7789.st7789_send_cmd(0x10)
+    
     def sleep(self):
-        self._drv.st7789_send_cmd(0x10)
-
+        st7789.st7789_send_cmd(0x10)
+    
     def wakeup(self):
-        self._drv.st7789_send_cmd(0x11)
+        st7789.st7789_send_cmd(0x11)
 
 
 
@@ -226,6 +254,9 @@ class Pmu:
     def __init__(self, i2c):
         self._drv = axp202.PMU(i2c)
         self._bm  = bytearray(_BM_PMU_MAX)
+        
+        self._drv.setPowerOutPut(axp202.AXP202_LDO2, False)
+        self._drv.setPowerOutPut(axp202.AXP202_LDO3, False)
         
         self._drv.setShutdownTime(axp202.AXP_POWER_OFF_TIME_4S)
         self._drv.setChgLEDMode(axp202.AXP20X_LED_OFF)
@@ -239,6 +270,11 @@ class Pmu:
         self._drv.setPowerOutPut(axp202.AXP202_DCDC2, False)
         self.audio_on   = False
         self.display_on = False
+    
+    
+    @property
+    def freq(self):
+        return freq()
     
     
     @property
@@ -267,16 +303,18 @@ class Pmu:
     
     
     @property
-    def display_volt(self) -> float:
-        return bool(self._bm[_BM_PMU_DISPLAY_V] * 100)
+    def display_power(self) -> float:
+        return self._bm[_BM_PMU_DISPLAY_V] / 255
     
     
-    @display_volt.setter
-    def display_volt(self,
+    @display_power.setter
+    def display_power(self,
                      val : float):
-        nv = int(val // 100)
-        self._bm[_BM_PMU_DISPLAY_V] = nv
-        self._drv.setLDO2Voltage(min(_DISP_V_MAX, max(_DISP_V_MIN, nv * 100)))
+        nv = max(0, min(255, int(val * 255)))
+        
+        if not nv == self._bm[_BM_PMU_DISPLAY_V]:
+            self._bm[_BM_PMU_DISPLAY_V] = nv
+            self._drv.setLDO2Voltage(_DISP_V_MIN + nv * _DISP_V_RNG // 255)
 
 
 
