@@ -2,7 +2,7 @@
 # See https://github.com/ondiiik/micropython-twatch-2020 for more
 import                               axp202
 import lvgl                       as lv
-import                               lvesp32
+# import                               lvesp32
 import st7789_lvgl                as st7789
 import                               ft6x36
 from   imagetools import             get_png_info, open_png
@@ -24,7 +24,7 @@ _DISP_V_RNG        = const(_DISP_V_MAX - _DISP_V_MIN)  # Display voltage range
 _DISP_BL_FREQ      = const(120)                        # Display backlight PWM frequency
 _DISP_H_RES        = const(240)                        # Display horizontalresolution in pixels
 _DISP_V_RES        = const(240)                        # Display vertical resolution in pixels
-_DISP_BUFF_SIZE    = const(_DISP_H_RES * 10)           # LVGL display draw buffer size
+_DISP_BUFF_SIZE    = const(_DISP_H_RES * 16)           # LVGL display draw buffer size
 _DISP_FADE_STEP    = const(1)                          # Backlight fade in/out step delay in milliseconds
 
 # Power management unit bytes module indexes
@@ -113,13 +113,53 @@ class Bios:
 
 
 
+# splash screen
+class Splash(lv.obj):
+    def __init__(self, scr):
+        super().__init__(scr)
+        
+        try:
+            with open('splash.png' ,'rb') as f:
+                decoder         = lv.img.decoder_create()
+                decoder.info_cb = get_png_info
+                decoder.open_cb = open_png
+                
+                png_data        = f.read()
+                png_img_dsc     = lv.img_dsc_t( { 'data_size': len(png_data),
+                                                  'data'     : png_data } )
+                
+                img  = lv.img(self)
+                img.align(scr, lv.ALIGN.IN_TOP_LEFT, 0, 0)
+                img.set_src(png_img_dsc)
+        except:
+            img = lv.obj(self)
+        
+        self._lbl = lv.label(img)
+        self._lbl.set_style_local_text_color(self.PART.MAIN,
+                                             lv.STATE.DEFAULT,
+                                             lv.color_hex3(0xFF8))
+        self.label = 'Loading bios ...'
+    
+    
+    @property
+    def label(self):
+        return self._txt
+    
+    
+    @label.setter
+    def label(self, txt):
+        print(txt)
+        self._txt = txt
+        self._lbl.set_text(txt)
+        self._lbl.align(self, lv.ALIGN.IN_BOTTOM_MID, 0, -12)
+    
+    
+    
 # display interface
 class Display:
     def __init__(self, pmu):
         self._brightness = 0
         self._backlight  = PWM(Pin(_PIN_BACKLIGHT, Pin.OUT), freq = _DISP_BL_FREQ, duty = 0)
-        self.disp        = None
-        self.indev       = None
         
         # Initilaize LVGL first
         lv.init()
@@ -158,27 +198,18 @@ class Display:
         pmu.display_power  = 1
         pmu.display_on     = True
         
-        try:
-            with open('splash.png' ,'rb') as f:
-                decoder         = lv.img.decoder_create()
-                decoder.info_cb = get_png_info
-                decoder.open_cb = open_png
-                
-                png_data        = f.read()
-                png_img_dsc     = lv.img_dsc_t( { 'data_size': len(png_data),
-                                                  'data'     : png_data } )
-                
-                scr  = lv.obj()
-                img  = lv.img(scr)
-                img.align(scr, lv.ALIGN.IN_TOP_LEFT, 0, 0)
-                img.set_src(png_img_dsc)
-                
-                lv.scr_load(scr)
-                
-                self.fade(0.1)
-        except:
-            self.brightness = 0.1
+        self.splash        = Splash(None)
+        lv.scr_load(self.splash)
+        self.refresh(10)
+        
+        self.fade(0.1)
     
+    
+    
+    @staticmethod
+    def refresh(rate : int = 10):
+        lv.tick_inc(rate)
+        lv.task_handler()
     
     
     async def afade(self,
