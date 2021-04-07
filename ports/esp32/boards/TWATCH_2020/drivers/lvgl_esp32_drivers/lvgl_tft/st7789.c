@@ -93,8 +93,6 @@ void st7789_init(void)
     gpio_set_level(ST7789_RST, 1);
     vTaskDelay(100 / portTICK_RATE_MS);
 
-    printf("ST7789 initialization.\n");
-
     //Send all the commands
     uint16_t cmd = 0;
     while (st7789_init_cmds[cmd].databytes!=0xff) {
@@ -114,7 +112,6 @@ void st7789_init(void)
 void st7789_enable_backlight(bool backlight)
 {
 #if ST7789_ENABLE_BACKLIGHT_CONTROL
-    printf("%s backlight.\n", backlight ? "Enabling" : "Disabling");
     uint32_t tmp = 0;
 
 #if (ST7789_BCKL_ACTIVE_LVL==1)
