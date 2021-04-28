@@ -118,16 +118,10 @@ STATIC const pyb_uart_irq_map_t mp_uart_irq_map[] = {
 void uart_init0(void) {
     #if defined(STM32H7)
     RCC_PeriphCLKInitTypeDef RCC_PeriphClkInit = {0};
-    // Configure USART1/6 clock source
-    RCC_PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_USART16;
+    // Configure USART1/6 and USART2/3/4/5/7/8 clock sources
+    RCC_PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_USART16 | RCC_PERIPHCLK_USART234578;
     RCC_PeriphClkInit.Usart16ClockSelection = RCC_USART16CLKSOURCE_D2PCLK2;
-    if (HAL_RCCEx_PeriphCLKConfig(&RCC_PeriphClkInit) != HAL_OK) {
-        __fatal_error("HAL_RCCEx_PeriphCLKConfig");
-    }
-
-    // Configure USART2/3/4/5/7/8 clock source
-    RCC_PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_USART234578;
-    RCC_PeriphClkInit.Usart16ClockSelection = RCC_USART234578CLKSOURCE_D2PCLK1;
+    RCC_PeriphClkInit.Usart234578ClockSelection = RCC_USART234578CLKSOURCE_D2PCLK1;
     if (HAL_RCCEx_PeriphCLKConfig(&RCC_PeriphClkInit) != HAL_OK) {
         __fatal_error("HAL_RCCEx_PeriphCLKConfig");
     }
@@ -711,16 +705,11 @@ uint32_t uart_get_source_freq(pyb_uart_obj_t *self) {
 }
 
 uint32_t uart_get_baudrate(pyb_uart_obj_t *self) {
-    // This formula assumes UART_OVERSAMPLING_16
-    uint32_t source_freq = uart_get_source_freq(self);
-    #if defined(LPUART1)
-    if (self->uart_id == PYB_LPUART_1) {
-        return source_freq / (self->uartx->BRR >> 8);
-    } else
-    #endif
-    {
-        return source_freq / self->uartx->BRR;
-    }
+    return LL_USART_GetBaudRate(self->uartx, uart_get_source_freq(self),
+        #if defined(STM32H7) || defined(STM32WB)
+        self->uartx->PRESC,
+        #endif
+        LL_USART_OVERSAMPLING_16);
 }
 
 void uart_set_baudrate(pyb_uart_obj_t *self, uint32_t baudrate) {
