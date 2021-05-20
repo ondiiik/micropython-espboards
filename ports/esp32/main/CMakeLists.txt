@@ -112,6 +112,7 @@ set(IDF_COMPONENTS
     driver
     esp-tls
     esp32
+    esp_adc_cal
     esp_common
     esp_eth
     esp_event
