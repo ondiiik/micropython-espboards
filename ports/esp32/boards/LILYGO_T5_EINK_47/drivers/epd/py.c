@@ -23,21 +23,33 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+#include "py/binary.h"
+#include "py/objarray.h"
 #include "py/runtime.h"
-#include "py/obj.h"
+
 
 #include "epd_driver.h"
-#include "epd_highlevel.h"
 #include <stdint.h>
 
 
 typedef struct my_epd_obj
 {
-    mp_obj_base_t       base;
-    EpdiyHighlevelState hl;
-    uint8_t*            fb;
+    mp_obj_base_t   base;
+    mp_obj_array_t* fb;
 }
 my_epd_obj;
+
+
+static mp_obj_array_t* new_ba(size_t aSize)
+{
+    mp_obj_array_t* ba = m_malloc(sizeof(*ba) + aSize);
+    ba->base.type      = &mp_type_bytearray;
+    ba->typecode       = BYTEARRAY_TYPECODE;
+    ba->free           = 0;
+    ba->len            = aSize;
+    ba->items          = ba + 1;
+    return ba;
+}
 
 
 static bool                singleton;
@@ -56,20 +68,14 @@ mp_obj_t my_epd_make_new(const mp_obj_type_t* aType,
     
     singleton = true;
     
-    
-    mp_arg_check_num(aArgsCnt, aKwCnt, 2, 2, false);
+    mp_arg_check_num(aArgsCnt, aKwCnt, 0, 0, false);
     
     my_epd_obj* self = m_new(my_epd_obj, 1);
     self->base.type  = &py_epd_type;
     
-    epd_init(MP_OBJ_SMALL_INT_VALUE(aArgs[0]));
+    epd_init();
+    self->fb = new_ba(EPD_WIDTH / 2 * EPD_HEIGHT);
     
-    self->hl = epd_hl_init(EPD_BUILTIN_WAVEFORM);
-    
-    epd_set_rotation(MP_OBJ_SMALL_INT_VALUE(aArgs[1]));
-    
-    self->fb = epd_hl_get_framebuffer(&self->hl);
-
     return MP_OBJ_FROM_PTR(self);
 }
 
@@ -77,7 +83,7 @@ mp_obj_t my_epd_make_new(const mp_obj_type_t* aType,
 STATIC mp_obj_t py_epd_fb(mp_obj_t aSelf)
 {
     my_epd_obj* self = MP_OBJ_TO_PTR(aSelf);
-    return mp_obj_new_bytearray_by_ref(EPD_WIDTH / 2 * EPD_HEIGHT, self->fb);
+    return self->fb;
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_1(py_epd_fb_obj, py_epd_fb);
 
@@ -129,9 +135,10 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_1(py_epd_clear_obj, py_epd_clear);
 STATIC mp_obj_t py_epd_flush(mp_obj_t aSelf)
 {
     my_epd_obj* self = MP_OBJ_TO_PTR(aSelf);
+    Rect_t      area = { 0, 0, EPD_WIDTH, EPD_HEIGHT };
     
     MP_THREAD_GIL_EXIT();
-    (void)epd_hl_update_screen(&self->hl, MODE_GC16, 20);
+    epd_draw_image(area, self->fb->items, BLACK_ON_WHITE);
     MP_THREAD_GIL_ENTER();
     
     return mp_const_none;
@@ -139,56 +146,10 @@ STATIC mp_obj_t py_epd_flush(mp_obj_t aSelf)
 STATIC MP_DEFINE_CONST_FUN_OBJ_1(py_epd_flush_obj, py_epd_flush);
 
 
-//STATIC mp_obj_t py_epd_draw_image(size_t          aArgsCnt,
-//                                  const mp_obj_t* aArgs)
-//{
-//    mp_buffer_info_t bufinfo;
-//    mp_get_buffer_raise(aArgs[4], &bufinfo, MP_BUFFER_READ);
-//    
-//    Rect_t area =
-//    {
-//        MP_OBJ_SMALL_INT_VALUE(aArgs[0]),
-//        MP_OBJ_SMALL_INT_VALUE(aArgs[1]),
-//        MP_OBJ_SMALL_INT_VALUE(aArgs[2]),
-//        MP_OBJ_SMALL_INT_VALUE(aArgs[3])
-//    };
-//    
-//    MP_THREAD_GIL_EXIT();
-//    epd_draw_image(area, bufinfo.buf, MP_OBJ_SMALL_INT_VALUE(aArgs[5]));
-//    MP_THREAD_GIL_ENTER();
-//    
-//    return mp_const_none;
-//}
-//STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(py_epd_draw_image_obj, 6, 6, py_epd_draw_image);
-//
-//
-//STATIC mp_obj_t py_epd_draw_image_g16(size_t          aArgsCnt,
-//                                      const mp_obj_t* aArgs)
-//{
-//    mp_buffer_info_t bufinfo;
-//    mp_get_buffer_raise(aArgs[4], &bufinfo, MP_BUFFER_READ);
-//    
-//    Rect_t area =
-//    {
-//        MP_OBJ_SMALL_INT_VALUE(aArgs[0]),
-//        MP_OBJ_SMALL_INT_VALUE(aArgs[1]),
-//        MP_OBJ_SMALL_INT_VALUE(aArgs[2]),
-//        MP_OBJ_SMALL_INT_VALUE(aArgs[3])
-//    };
-//    
-//    MP_THREAD_GIL_EXIT();
-//    epd_draw_grayscale_image(area, bufinfo.buf);
-//    MP_THREAD_GIL_ENTER();
-//    
-//    return mp_const_none;
-//}
-//STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(py_epd_draw_image_g16_obj, 5, 5, py_epd_draw_image_g16);
-
-
 STATIC mp_obj_t py_epd_clear_area(size_t          aArgsCnt,
                                   const mp_obj_t* aArgs)
 {
-    EpdRect area =
+    Rect_t area =
     {
         MP_OBJ_SMALL_INT_VALUE(aArgs[1]),
         MP_OBJ_SMALL_INT_VALUE(aArgs[2]),
@@ -232,23 +193,8 @@ static const mp_obj_type_t py_epd_type =
 
 STATIC const mp_map_elem_t globals_dict_table[] =
 {
-    { MP_ROM_QSTR(MP_QSTR___name__),           MP_ROM_QSTR(MP_QSTR_epd)               },
-    { MP_ROM_QSTR(MP_QSTR_Epd),                MP_ROM_PTR(&py_epd_type)               },
-//    { MP_ROM_QSTR(MP_QSTR_draw_image),         (mp_obj_t)&py_epd_draw_image_obj       },
-//    { MP_ROM_QSTR(MP_QSTR_draw_image_g16),     (mp_obj_t)&py_epd_draw_image_g16_obj   },
-    { MP_ROM_QSTR(MP_QSTR_DEFAULT),            MP_ROM_INT(EPD_OPTIONS_DEFAULT)        },
-    { MP_ROM_QSTR(MP_QSTR_LUT_1K),             MP_ROM_INT(EPD_LUT_1K)                 },
-    { MP_ROM_QSTR(MP_QSTR_LUT_64K),            MP_ROM_INT(EPD_LUT_64K)                },
-    { MP_ROM_QSTR(MP_QSTR_FEED_QUEUE_8),       MP_ROM_INT(EPD_FEED_QUEUE_8)           },
-    { MP_ROM_QSTR(MP_QSTR_FEED_QUEUE_32),      MP_ROM_INT(EPD_FEED_QUEUE_32)          },
-    { MP_ROM_QSTR(MP_QSTR_LANDSCAPE),          MP_ROM_INT(EPD_ROT_LANDSCAPE)          },
-    { MP_ROM_QSTR(MP_QSTR_PORTRAIT),           MP_ROM_INT(EPD_ROT_PORTRAIT)           },
-    { MP_ROM_QSTR(MP_QSTR_INVERTED_LANDSCAPE), MP_ROM_INT(EPD_ROT_INVERTED_LANDSCAPE) },
-    { MP_ROM_QSTR(MP_QSTR_INVERTED_PORTRAIT),  MP_ROM_INT(EPD_ROT_INVERTED_PORTRAIT)  },
-//    { MP_ROM_QSTR(MP_QSTR_BLACK_ON_WHITE),     MP_ROM_INT(BLACK_ON_WHITE)             },
-//    { MP_ROM_QSTR(MP_QSTR_WHITE_ON_WHITE),     MP_ROM_INT(WHITE_ON_WHITE)             },
-//    { MP_ROM_QSTR(MP_QSTR_WHITE_ON_BLACK),     MP_ROM_INT(WHITE_ON_BLACK)             },
-//    { MP_ROM_QSTR(MP_QSTR_DRAW_BACKGROUND),    MP_ROM_INT(DRAW_BACKGROUND)            },
+    { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_epd) },
+    { MP_ROM_QSTR(MP_QSTR_Epd),      MP_ROM_PTR(&py_epd_type) },
 };
 STATIC MP_DEFINE_CONST_DICT(globals_dict, globals_dict_table);
 
@@ -256,7 +202,7 @@ STATIC MP_DEFINE_CONST_DICT(globals_dict, globals_dict_table);
 const mp_obj_module_t mp_module_epd =
 {
     .base    = {&mp_type_module},
-    .globals = (mp_obj_t)&globals_dict,
+    .globals = MP_ROM_PTR(&globals_dict),
 };
 MP_REGISTER_MODULE(MP_QSTR_epd, mp_module_epd, 1);
 
