@@ -33,12 +33,13 @@ endif
 all:
 	idf.py $(IDFPY_FLAGS) build
 	@$(PYTHON) makeimg.py \
+		$(BUILD)/sdkconfig \
 		$(BUILD)/bootloader/bootloader.bin \
 		$(BUILD)/partition_table/partition-table.bin \
     		$(BUILD)/micropython.bin \
     		$(BUILD)/firmware.bin
 
-$(BUILD)/bootloader/bootloader.bin $(BUILD)/partition_table/partition  -table.bin $(BUILD)/micropython.bin: FORCE
+$(BUILD)/bootloader/bootloader.bin $(BUILD)/partition_table/partition-table.bin $(BUILD)/micropython.bin: FORCE
 
 clean:
 	idf.py $(IDFPY_FLAGS) fullclean

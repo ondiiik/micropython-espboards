@@ -11,7 +11,7 @@ from pcf8563      import PCF8563  as pcf8563
 from machine      import             Pin, I2C, PWM, freq
 from time         import             sleep_ms, ticks_ms
 from uasyncio     import sleep_ms as asleep_ms
-from i2s          import             I2S
+from machine      import             I2S
 from ustruct      import             unpack
 
 

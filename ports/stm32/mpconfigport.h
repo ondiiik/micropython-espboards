@@ -56,7 +56,9 @@
 #define MICROPY_COMP_RETURN_IF_EXPR (1)
 
 // optimisations
+#ifndef MICROPY_OPT_COMPUTED_GOTO
 #define MICROPY_OPT_COMPUTED_GOTO   (1)
+#endif
 #define MICROPY_OPT_CACHE_MAP_LOOKUP_IN_BYTECODE (0)
 #define MICROPY_OPT_MPZ_BITWISE     (1)
 #define MICROPY_OPT_MATH_FACTORIAL  (1)
@@ -91,6 +93,9 @@
 #define MICROPY_PY_FUNCTION_ATTRS   (1)
 #define MICROPY_PY_DESCRIPTORS      (1)
 #define MICROPY_PY_DELATTR_SETATTR  (1)
+#ifndef MICROPY_PY_FSTRINGS
+#define MICROPY_PY_FSTRINGS         (1)
+#endif
 #define MICROPY_PY_BUILTINS_STR_UNICODE (1)
 #define MICROPY_PY_BUILTINS_STR_CENTER (1)
 #define MICROPY_PY_BUILTINS_STR_PARTITION (1)
@@ -190,6 +195,9 @@
 #define MICROPY_PY_LWIP_SOCK_RAW    (MICROPY_PY_LWIP)
 #ifndef MICROPY_PY_MACHINE
 #define MICROPY_PY_MACHINE          (1)
+#ifndef MICROPY_PY_MACHINE_BITSTREAM
+#define MICROPY_PY_MACHINE_BITSTREAM (1)
+#endif
 #define MICROPY_PY_MACHINE_PULSE    (1)
 #define MICROPY_PY_MACHINE_PIN_MAKE_NEW mp_pin_make_new
 #define MICROPY_PY_MACHINE_I2C      (1)
@@ -382,6 +390,9 @@ struct _mp_bluetooth_btstack_root_pointers_t;
     \
     /* pointers to all CAN objects (if they have been created) */ \
     struct _pyb_can_obj_t *pyb_can_obj_all[MICROPY_HW_MAX_CAN]; \
+    \
+    /* USB_VCP IRQ callbacks (if they have been set) */ \
+    mp_obj_t pyb_usb_vcp_irq[MICROPY_HW_USB_CDC_NUM]; \
     \
     /* list of registered NICs */ \
     mp_obj_list_t mod_network_nic_list; \
