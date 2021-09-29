@@ -1,8 +1,11 @@
+#!/usr/bin/env python3
 import secrets
 
 with open('modules/cr.py', 'w') as f:
-    f.write('''
-from ucryptolib import aes as _
+    f.write('''try:
+    from ucryptolib import aes as _
+except:
+    from  cryptolib import aes as _
 
 def c(k={}):
     return _(k, 2, {})
