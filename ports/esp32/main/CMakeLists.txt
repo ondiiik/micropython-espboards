@@ -47,6 +47,7 @@ set(MICROPY_SOURCE_PORT
     ${PROJECT_DIR}/main.c
     ${PROJECT_DIR}/uart.c
     ${PROJECT_DIR}/usb.c
+    ${PROJECT_DIR}/usb_serial_jtag.c
     ${PROJECT_DIR}/gccollect.c
     ${PROJECT_DIR}/mphalport.c
     ${PROJECT_DIR}/fatfs_port.c
@@ -61,12 +62,12 @@ set(MICROPY_SOURCE_PORT
     ${PROJECT_DIR}/machine_dac.c
     ${PROJECT_DIR}/machine_i2c.c
     ${PROJECT_DIR}/machine_i2s.c
-    ${PROJECT_DIR}/machine_pwm.c
     ${PROJECT_DIR}/machine_uart.c
     ${PROJECT_DIR}/modmachine.c
     ${PROJECT_DIR}/modnetwork.c
     ${PROJECT_DIR}/network_lan.c
     ${PROJECT_DIR}/network_ppp.c
+    ${PROJECT_DIR}/network_wlan.c
     ${PROJECT_DIR}/mpnimbleport.c
     ${PROJECT_DIR}/modsocket.c
     ${PROJECT_DIR}/modesp.c
@@ -114,6 +115,7 @@ set(MICROPY_SOURCE_QSTR
     ${MICROPY_SOURCE_PORT}
     ${MICROPY_SOURCE_BOARD_DRIVERS}
     ${MICROPY_SOURCE_LVGL}
+    ${MICROPY_SOURCE_BOARD}
 )
 
 set(IDF_COMPONENTS
@@ -188,6 +190,7 @@ idf_component_register(
         ${MICROPY_SOURCE_PORT}
         ${MICROPY_SOURCE_BOARD_DRIVERS}
         ${MICROPY_SOURCE_LVGL}
+        ${MICROPY_SOURCE_BOARD}
     INCLUDE_DIRS
         ${MICROPY_INC_CORE}
         ${MICROPY_INC_USERMOD}

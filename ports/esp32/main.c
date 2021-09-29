@@ -58,6 +58,7 @@
 #include "shared/runtime/pyexec.h"
 #include "uart.h"
 #include "usb.h"
+#include "usb_serial_jtag.h"
 #include "modmachine.h"
 #include "modnetwork.h"
 #include "mpthreadport.h"
@@ -89,6 +90,8 @@ void mp_task(void *pvParameter) {
     #endif
     #if CONFIG_USB_ENABLED
     usb_init();
+    #elif CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+    usb_serial_jtag_init();
     #else
     uart_init();
     #endif
@@ -199,12 +202,20 @@ soft_reset_exit:
     goto soft_reset;
 }
 
-void app_main(void) {
+void boardctrl_startup(void) {
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         nvs_flash_erase();
         nvs_flash_init();
     }
+}
+
+void app_main(void) {
+    // Hook for a board to run code at start up.
+    // This defaults to initialising NVS.
+    MICROPY_BOARD_STARTUP();
+
+    // Create and transfer control to the MicroPython task.
     xTaskCreatePinnedToCore(mp_task, "mp_task", MP_TASK_STACK_SIZE / sizeof(StackType_t), NULL, MP_TASK_PRIORITY, &mp_main_task_handle, MP_TASK_COREID);
 }
 
