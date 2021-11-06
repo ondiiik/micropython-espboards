@@ -1,5 +1,5 @@
 set(SDKCONFIG_DEFAULTS
-    boards/sdkconfig.base
+    boards/sdkconfig.base4m
     boards/sdkconfig.ble
     boards/sdkconfig.spiram
 )
