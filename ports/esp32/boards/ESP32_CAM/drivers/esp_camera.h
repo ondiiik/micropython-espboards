@@ -120,5 +120,3 @@ extern void _esp_camera_recalculate_compression(int aJpegQuality);
 }
 #endif
 
-#include "img_converters.h"
-

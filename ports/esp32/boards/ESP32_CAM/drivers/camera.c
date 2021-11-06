@@ -36,18 +36,7 @@
 #include "esp_camera.h"
 #include "camera_common.h"
 #include "xclk.h"
-#if CONFIG_OV2640_SUPPORT
 #include "ov2640.h"
-#endif
-#if CONFIG_OV7725_SUPPORT
-#include "ov7725.h"
-#endif
-#if CONFIG_OV3660_SUPPORT
-#include "ov3660.h"
-#endif
-#if CONFIG_OV5640_SUPPORT
-#include "ov5640.h"
-#endif
 
 typedef enum
 {
@@ -78,12 +67,52 @@ static const char* TAG = "camera";
 static const char* CAMERA_SENSOR_NVS_KEY = "sensor";
 static const char* CAMERA_PIXFORMAT_NVS_KEY = "pixformat";
 
+typedef void (*dma_filter_t)(const dma_elem_t* src, lldesc_t* dma_desc, uint8_t* dst);
+
 typedef struct fb_s
 {
     uint8_t* buf;
     size_t len;
     struct fb_s* next;
 } fb_item_t;
+
+typedef struct
+{
+    camera_config_t config;
+    sensor_t sensor;
+    
+    struct campy_FrameBuffer* fb;
+    size_t fb_size;
+    size_t data_size;
+    
+    size_t width;
+    size_t height;
+    size_t in_bytes_per_pixel;
+    size_t fb_bytes_per_pixel;
+    
+    size_t dma_received_count;
+    size_t dma_filtered_count;
+    size_t dma_per_line;
+    size_t dma_buf_width;
+    size_t dma_sample_count;
+    
+    lldesc_t* dma_desc;
+    dma_elem_t** dma_buf;
+    size_t dma_desc_count;
+    size_t dma_desc_cur;
+    
+    i2s_sampling_mode_t sampling_mode;
+    dma_filter_t dma_filter;
+    intr_handle_t i2s_intr_handle;
+    QueueHandle_t data_ready;
+    QueueHandle_t fb_in;
+    QueueHandle_t fb_out;
+    
+    SemaphoreHandle_t frame_ready;
+    TaskHandle_t dma_filter_task;
+} camera_state_t;
+
+camera_state_t* s_state = NULL;
 
 static void i2s_init();
 static int i2s_run();
@@ -175,18 +204,9 @@ static void skip_frame()
 
 static esp_err_t dma_desc_init()
 {
-    if (0 != (s_state->width % 4))
-    {
-        mp_raise_msg(&mp_type_Exception, MP_ERROR_TEXT("Frame width shall be aligned to 4 bytes"));
-    }
-    
-    
+    assert(s_state->width % 4 == 0);
     size_t line_size = s_state->width * s_state->in_bytes_per_pixel * i2s_bytes_per_sample(s_state->sampling_mode);
-    MP_LOGD(TAG, "Line size (for DMA): %d bytes [W%d, BPP%d, I2S%d]",
-            line_size,
-            s_state->width,
-            s_state->in_bytes_per_pixel,
-            i2s_bytes_per_sample(s_state->sampling_mode));
+    MP_LOGD(TAG, "Line width (for DMA): %d bytes", line_size);
     
     size_t dma_per_line = 1;
     size_t buf_size     = line_size;
@@ -201,9 +221,9 @@ static esp_err_t dma_desc_init()
     s_state->dma_buf_width  = line_size;
     s_state->dma_per_line   = dma_per_line;
     s_state->dma_desc_count = dma_desc_count;
-    MP_LOGD(TAG, "DMA buffer size:     %d, DMA buffers per line: %d", buf_size, dma_per_line);
-    MP_LOGD(TAG, "DMA buffer count:    %d", dma_desc_count);
-    MP_LOGD(TAG, "DMA buffer total:    %d bytes", buf_size * dma_desc_count);
+    MP_LOGD(TAG, "DMA buffer size: %d, DMA buffers per line: %d", buf_size, dma_per_line);
+    MP_LOGD(TAG, "DMA buffer count: %d", dma_desc_count);
+    MP_LOGD(TAG, "DMA buffer total: %d bytes", buf_size * dma_desc_count);
     
     s_state->dma_buf = (dma_elem_t**)malloc(sizeof(dma_elem_t*) * dma_desc_count);
     
@@ -308,39 +328,36 @@ static void i2s_init()
         config->pin_href,
         config->pin_pclk
     };
-    
     gpio_config_t conf =
     {
-        .mode         = GPIO_MODE_INPUT,
-        .pull_up_en   = GPIO_PULLUP_ENABLE,
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type    = GPIO_INTR_DISABLE
+        .intr_type = GPIO_INTR_DISABLE
     };
-    
     for (int i = 0; i < sizeof(pins) / sizeof(gpio_num_t); ++i)
     {
         if (rtc_gpio_is_valid_gpio(pins[i]))
         {
             rtc_gpio_deinit(pins[i]);
         }
-        
         conf.pin_bit_mask = 1LL << pins[i];
         gpio_config(&conf);
     }
     
     // Route input GPIOs to I2S peripheral using GPIO matrix
-    gpio_matrix_in(config->pin_d0,    I2S0I_DATA_IN0_IDX, false);
-    gpio_matrix_in(config->pin_d1,    I2S0I_DATA_IN1_IDX, false);
-    gpio_matrix_in(config->pin_d2,    I2S0I_DATA_IN2_IDX, false);
-    gpio_matrix_in(config->pin_d3,    I2S0I_DATA_IN3_IDX, false);
-    gpio_matrix_in(config->pin_d4,    I2S0I_DATA_IN4_IDX, false);
-    gpio_matrix_in(config->pin_d5,    I2S0I_DATA_IN5_IDX, false);
-    gpio_matrix_in(config->pin_d6,    I2S0I_DATA_IN6_IDX, false);
-    gpio_matrix_in(config->pin_d7,    I2S0I_DATA_IN7_IDX, false);
-    gpio_matrix_in(config->pin_vsync, I2S0I_V_SYNC_IDX,   false);
-    gpio_matrix_in(0x38,              I2S0I_H_SYNC_IDX,   false);
-    gpio_matrix_in(config->pin_href,  I2S0I_H_ENABLE_IDX, false);
-    gpio_matrix_in(config->pin_pclk,  I2S0I_WS_IN_IDX,    false);
+    gpio_matrix_in(config->pin_d0, I2S0I_DATA_IN0_IDX, false);
+    gpio_matrix_in(config->pin_d1, I2S0I_DATA_IN1_IDX, false);
+    gpio_matrix_in(config->pin_d2, I2S0I_DATA_IN2_IDX, false);
+    gpio_matrix_in(config->pin_d3, I2S0I_DATA_IN3_IDX, false);
+    gpio_matrix_in(config->pin_d4, I2S0I_DATA_IN4_IDX, false);
+    gpio_matrix_in(config->pin_d5, I2S0I_DATA_IN5_IDX, false);
+    gpio_matrix_in(config->pin_d6, I2S0I_DATA_IN6_IDX, false);
+    gpio_matrix_in(config->pin_d7, I2S0I_DATA_IN7_IDX, false);
+    gpio_matrix_in(config->pin_vsync, I2S0I_V_SYNC_IDX, false);
+    gpio_matrix_in(0x38, I2S0I_H_SYNC_IDX, false);
+    gpio_matrix_in(config->pin_href, I2S0I_H_ENABLE_IDX, false);
+    gpio_matrix_in(config->pin_pclk, I2S0I_WS_IN_IDX, false);
     
     // Enable and configure I2S peripheral
     periph_module_enable(PERIPH_I2S0_MODULE);
@@ -412,8 +429,6 @@ static int i2s_run()
         memset(s_state->dma_buf[i], 0, d->length);
     }
     
-    struct campy_FrameBuffer* fb = s_state->fb;
-    
     //todo: wait for vsync
     MP_LOGV(TAG, "Waiting for negative edge on VSYNC");
     
@@ -450,56 +465,50 @@ static void IRAM_ATTR i2s_stop(bool* need_yield)
         s_state->dma_received_count = 0;
     }
     
-    size_t     val = SIZE_MAX;
+    size_t val = SIZE_MAX;
     BaseType_t higher_priority_task_woken;
     BaseType_t ret = xQueueSendFromISR(s_state->data_ready, &val, &higher_priority_task_woken);
-    
     if (need_yield && !*need_yield)
     {
-        *need_yield = (ret && higher_priority_task_woken);
+        *need_yield = (ret == pdTRUE && higher_priority_task_woken == pdTRUE);
     }
 }
 
 static void IRAM_ATTR signal_dma_buf_received(bool* need_yield)
 {
     size_t dma_desc_filled = s_state->dma_desc_cur;
-    
-    s_state->dma_desc_cur  = (dma_desc_filled + 1) % s_state->dma_desc_count;
+    s_state->dma_desc_cur = (dma_desc_filled + 1) % s_state->dma_desc_count;
     s_state->dma_received_count++;
-    
     if (!s_state->fb->ref && s_state->fb->bad)
     {
         *need_yield = false;
         return;
     }
-    
     BaseType_t higher_priority_task_woken;
     BaseType_t ret = xQueueSendFromISR(s_state->data_ready, &dma_desc_filled, &higher_priority_task_woken);
-    
     if (ret != pdTRUE)
     {
         if (!s_state->fb->ref)
         {
             s_state->fb->bad = 1;
         }
+        //ESP_EARLY_LOGW(TAG, "qsf:%d", s_state->dma_received_count);
+        //ets_printf("qsf:%d\n", s_state->dma_received_count);
+        //ets_printf("qovf\n");
     }
-    
-    *need_yield = (ret && higher_priority_task_woken);
+    *need_yield = (ret == pdTRUE && higher_priority_task_woken == pdTRUE);
 }
 
 static void IRAM_ATTR i2s_isr(void* arg)
 {
     I2S0.int_clr.val = I2S0.int_raw.val;
-    bool need_yield  = false;
-    
+    bool need_yield = false;
     signal_dma_buf_received(&need_yield);
-    
-    if ((s_state->config.pixel_format != PIXFORMAT_JPEG) &&
-        (s_state->dma_received_count  == (s_state->height * s_state->dma_per_line)))
+    if (s_state->config.pixel_format != PIXFORMAT_JPEG
+        && s_state->dma_received_count == s_state->height * s_state->dma_per_line)
     {
         i2s_stop(&need_yield);
     }
-    
     if (need_yield)
     {
         portYIELD_FROM_ISR();
@@ -509,39 +518,35 @@ static void IRAM_ATTR i2s_isr(void* arg)
 static void IRAM_ATTR vsync_isr(void* arg)
 {
     GPIO.status1_w1tc.val = GPIO.status1.val;
-    GPIO.status_w1tc      = GPIO.status;
-    
+    GPIO.status_w1tc = GPIO.status;
     bool need_yield = false;
-    
+    //if vsync is low and we have received some data, frame is done
     if (_gpio_get_level(s_state->config.pin_vsync) == 0)
     {
         if (s_state->dma_received_count > 0)
         {
             signal_dma_buf_received(&need_yield);
-            
-            if ((s_state->dma_filtered_count > 1) || (s_state->fb->bad))
+            //ets_printf("end_vsync\n");
+            if (s_state->dma_filtered_count > 1 || s_state->fb->bad)
             {
                 i2s_stop(&need_yield);
             }
+            //ets_printf("vs\n");
         }
-        
         if (s_state->dma_filtered_count < 2)
         {
             I2S0.conf.rx_start = 0;
             I2S0.in_link.start = 0;
-            I2S0.int_clr.val   = I2S0.int_raw.val;
-            
+            I2S0.int_clr.val = I2S0.int_raw.val;
             i2s_conf_reset();
-            
             s_state->dma_desc_cur = (s_state->dma_desc_cur + 1) % s_state->dma_desc_count;
-            
-            I2S0.in_link.addr  = (uint32_t)&s_state->dma_desc[s_state->dma_desc_cur];
+            //I2S0.rx_eof_num = s_state->dma_sample_count;
+            I2S0.in_link.addr = (uint32_t) &s_state->dma_desc[s_state->dma_desc_cur];
             I2S0.in_link.start = 1;
             I2S0.conf.rx_start = 1;
             s_state->dma_received_count = 0;
         }
     }
-    
     if (need_yield)
     {
         portYIELD_FROM_ISR();
@@ -616,17 +621,18 @@ static void IRAM_ATTR dma_finish_frame()
 static void IRAM_ATTR dma_filter_buffer(size_t buf_idx)
 {
     //no need to process the data if frame is in use or is bad
-    if ((s_state->fb->ref) || (s_state->fb->bad))
+    if (s_state->fb->ref || s_state->fb->bad)
     {
         return;
     }
     
     //check if there is enough space in the frame buffer for the new data
     size_t buf_len = s_state->width * s_state->fb_bytes_per_pixel / s_state->dma_per_line;
-    size_t fb_pos  = s_state->dma_filtered_count * buf_len;
-    
-    if (fb_pos > (s_state->fb_size - buf_len))
+    size_t fb_pos = s_state->dma_filtered_count * buf_len;
+    if (fb_pos > s_state->fb_size - buf_len)
     {
+        //size_t processed = s_state->dma_received_count * buf_len;
+        //ets_printf("[%s:%u] ovf pos: %u, processed: %u\n", __FUNCTION__, __LINE__, fb_pos, processed);
         return;
     }
     
@@ -665,7 +671,6 @@ static void IRAM_ATTR dma_filter_task(void* pvParameters)
     while (true)
     {
         size_t buf_idx;
-        
         if (xQueueReceive(s_state->data_ready, &buf_idx, portMAX_DELAY) == pdTRUE)
         {
             if (buf_idx == SIZE_MAX)
@@ -681,22 +686,16 @@ static void IRAM_ATTR dma_filter_task(void* pvParameters)
     }
 }
 
-static void IRAM_ATTR dma_filter_jpeg(const dma_elem_t* src,
-                                      lldesc_t*         dma_desc,
-                                      uint8_t*          dst)
+static void IRAM_ATTR dma_filter_jpeg(const dma_elem_t* src, lldesc_t* dma_desc, uint8_t* dst)
 {
-    size_t
-    end  = dma_desc->length;
-    end /= sizeof(dma_elem_t);
-    end /= 4;
-    
+    size_t end = dma_desc->length / sizeof(dma_elem_t) / 4;
+    // manually unrolling 4 iterations of the loop here
     for (size_t i = 0; i < end; ++i)
     {
         dst[0] = src[0].sample1;
         dst[1] = src[1].sample1;
         dst[2] = src[2].sample1;
         dst[3] = src[3].sample1;
-        
         src += 4;
         dst += 4;
     }
@@ -870,23 +869,18 @@ static void IRAM_ATTR dma_filter_rgb888_highspeed(const dma_elem_t* src, lldesc_
  * Public Methods
  * */
 
-esp_err_t camera_probe(const camera_config_t* config,
-                       camera_model_t*        out_camera_model)
+esp_err_t camera_probe(const camera_config_t* config, camera_model_t* out_camera_model)
 {
     if (s_state != NULL)
     {
         return ESP_ERR_INVALID_STATE;
     }
     
-    s_state = (camera_state_t*)m_malloc0(sizeof(*s_state));
-    
+    s_state = (camera_state_t*) m_malloc0(sizeof(*s_state));
     if (!s_state)
     {
         return ESP_ERR_NO_MEM;
     }
-    
-    s_state->base = NULL;
-    
     
     MP_LOGD(TAG, "Enabling XCLK output");
     camera_enable_out_clock(config);
@@ -978,30 +972,10 @@ esp_err_t camera_probe(const camera_config_t* config,
     
     switch (id->PID)
     {
-#if CONFIG_OV2640_SUPPORT
         case OV2640_PID:
             *out_camera_model = CAMERA_OV2640;
             ov2640_init(&s_state->sensor);
             break;
-#endif
-#if CONFIG_OV7725_SUPPORT
-        case OV7725_PID:
-            *out_camera_model = CAMERA_OV7725;
-            ov7725_init(&s_state->sensor);
-            break;
-#endif
-#if CONFIG_OV3660_SUPPORT
-        case OV3660_PID:
-            *out_camera_model = CAMERA_OV3660;
-            ov3660_init(&s_state->sensor);
-            break;
-#endif
-#if CONFIG_OV5640_SUPPORT
-        case OV5640_PID:
-            *out_camera_model = CAMERA_OV5640;
-            ov5640_init(&s_state->sensor);
-            break;
-#endif
         default:
             id->PID = 0;
             *out_camera_model = CAMERA_UNKNOWN;
@@ -1299,8 +1273,7 @@ void campy_Camera_init(struct campy_Camera* camera)
     }
     
     
-    switch (camera_model)
-    {
+    switch (camera_model) {
         case CAMERA_OV7725:
             MP_LOGI(TAG, "Detected OV7725 camera");
             
