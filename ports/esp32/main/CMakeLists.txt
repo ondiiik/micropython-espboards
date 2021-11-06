@@ -151,6 +151,11 @@ set(IDF_COMPONENTS
     xtensa
 )
 
+if(EXISTS ${IDF_PATH}/components/esp32-camera/CMakeLists.txt)
+    # esp32-camera is optional - see https://github.com/lemariva/micropython-camera-driver
+    list(APPEND IDF_COMPONENTS esp32-camera)
+endif()
+
 if(IDF_VERSION_MINOR GREATER_EQUAL 1)
     list(APPEND IDF_COMPONENTS esp_netif)
 endif()
