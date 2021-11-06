@@ -1011,38 +1011,12 @@ static void camera_init(const camera_config_t* config)
     
     switch (s_state->sensor.id.PID)
     {
-#if CONFIG_OV2640_SUPPORT
         case OV2640_PID:
             if (frame_size > FRAMESIZE_UXGA)
             {
                 frame_size = FRAMESIZE_UXGA;
             }
             break;
-#endif
-#if CONFIG_OV7725_SUPPORT
-        case OV7725_PID:
-            if (frame_size > FRAMESIZE_VGA)
-            {
-                frame_size = FRAMESIZE_VGA;
-            }
-            break;
-#endif
-#if CONFIG_OV3660_SUPPORT
-        case OV3660_PID:
-            if (frame_size > FRAMESIZE_QXGA)
-            {
-                frame_size = FRAMESIZE_QXGA;
-            }
-            break;
-#endif
-#if CONFIG_OV5640_SUPPORT
-        case OV5640_PID:
-            if (frame_size > FRAMESIZE_QSXGA)
-            {
-                frame_size = FRAMESIZE_QSXGA;
-            }
-            break;
-#endif
         default:
             mp_raise_msg(&mp_type_Exception, MP_ERROR_TEXT("Camera not supported"));
     }
@@ -1274,31 +1248,9 @@ void campy_Camera_init(struct campy_Camera* camera)
     
     
     switch (camera_model) {
-        case CAMERA_OV7725:
-            MP_LOGI(TAG, "Detected OV7725 camera");
-            
-            if (PIXFORMAT_JPEG == camera->config.pixel_format)
-            {
-                _init_skip();
-                mp_raise_msg(&mp_type_Exception, MP_ERROR_TEXT("Camera does not support JPEG"));
-            }
-            
-            memcpy(camera->model, "OV7725", sizeof(camera->model));
-            break;
-            
         case CAMERA_OV2640:
             MP_LOGI(TAG, "Detected OV2640 camera");
             memcpy(camera->model, "OV2640", sizeof(camera->model));
-            break;
-            
-        case CAMERA_OV3660:
-            MP_LOGI(TAG, "Detected OV3660 camera");
-            memcpy(camera->model, "OV3660", sizeof(camera->model));
-            break;
-            
-        case CAMERA_OV5640:
-            MP_LOGI(TAG, "Detected OV5640 camera");
-            memcpy(camera->model, "OV5640", sizeof(camera->model));
             break;
             
         default:

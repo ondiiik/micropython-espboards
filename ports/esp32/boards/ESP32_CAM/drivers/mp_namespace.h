@@ -41,16 +41,29 @@
     };
 
 
-#define MP_ATTR_PROPERTY(_parent_, _name_, _self_) \
+#define MP_LOAD  if (MP_OBJ_NULL == aDestination[0]) switch (aAttribute)
+
+
+#define MP_STORE else switch (aAttribute)
+
+
+#define MP_ATTR_PROPERTY(_module_, _class_, _name_) \
             case MP_QSTR_##_name_: \
-                aDestination[0] = mpy__##_parent_##__##_name_(_self_); \
+                aDestination[0] = mpy__##_module_##__##_class_##__##_name_##____load__(aSelf); \
                 break;
 
 
-#define MP_ATTR_METHOD(_parent_, _name_, _self_) \
+#define MP_ATTR_PROPERTY_SET(_module_, _class_, _name_) \
             case MP_QSTR_##_name_: \
-                aDestination[0] = (mp_obj_t)&mpy__##_parent_##__##_name_; \
-                aDestination[1] = _self_; \
+                mpy__##_module_##__##_class_##__##_name_##____store__(aSelf, aDestination[1]); \
+                aDestination[0] = MP_OBJ_NULL; \
+                break;
+
+
+#define MP_ATTR_METHOD(_module_, _class_, _name_) \
+            case MP_QSTR_##_name_: \
+                aDestination[0] = (mp_obj_t)&mpy__##_module_##__##_class_##__##_name_##____load__; \
+                aDestination[1] = aSelf; \
                 break;
 
 
@@ -59,18 +72,18 @@
 
 
 #define MP_FN_0(_parent_, _member_) \
-    STATIC mp_obj_t                                                 mpy__##_parent_##__##_member_##_##_F(); \
-    STATIC MP_DEFINE_CONST_FUN_OBJ_0(mpy__##_parent_##__##_member_, mpy__##_parent_##__##_member_##_##_F); \
-    mp_obj_t                                                        mpy__##_parent_##__##_member_##_##_F()
+    STATIC mp_obj_t                                                             mpy__##_parent_##__##_member_##_##_F(); \
+    STATIC MP_DEFINE_CONST_FUN_OBJ_0(mpy__##_parent_##__##_member_##____load__, mpy__##_parent_##__##_member_##_##_F); \
+    mp_obj_t                                                                    mpy__##_parent_##__##_member_##_##_F()
 
 
 #define MP_FN_1(_parent_, _member_, _a1_) \
-    STATIC mp_obj_t                                                 mpy__##_parent_##__##_member_##_##_F(const mp_obj_t _a1_); \
-    STATIC MP_DEFINE_CONST_FUN_OBJ_1(mpy__##_parent_##__##_member_, mpy__##_parent_##__##_member_##_##_F); \
-    mp_obj_t                                                        mpy__##_parent_##__##_member_##_##_F(const mp_obj_t _a1_)
+    STATIC mp_obj_t                                                             mpy__##_parent_##__##_member_##_##_F(const mp_obj_t _a1_); \
+    STATIC MP_DEFINE_CONST_FUN_OBJ_1(mpy__##_parent_##__##_member_##____load__, mpy__##_parent_##__##_member_##_##_F); \
+    mp_obj_t                                                                    mpy__##_parent_##__##_member_##_##_F(const mp_obj_t _a1_)
 
 
 #define MP_FN_2(_parent_, _member_, _a1_, _a2_) \
-    STATIC mp_obj_t                                                 mpy__##_parent_##__##_member_##_##_F(const mp_obj_t _a1_, const mp_obj_t _a2_); \
-    STATIC MP_DEFINE_CONST_FUN_OBJ_2(mpy__##_parent_##__##_member_, mpy__##_parent_##__##_member_##_##_F); \
-    mp_obj_t                                                        mpy__##_parent_##__##_member_##_##_F(const mp_obj_t _a1_, const mp_obj_t _a2_)
+    STATIC mp_obj_t                                                             mpy__##_parent_##__##_member_##_##_F(const mp_obj_t _a1_, const mp_obj_t _a2_); \
+    STATIC MP_DEFINE_CONST_FUN_OBJ_2(mpy__##_parent_##__##_member_##____load__, mpy__##_parent_##__##_member_##_##_F); \
+    mp_obj_t                                                                    mpy__##_parent_##__##_member_##_##_F(const mp_obj_t _a1_, const mp_obj_t _a2_)
