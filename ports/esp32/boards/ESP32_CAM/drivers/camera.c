@@ -63,6 +63,7 @@ typedef enum
 #include "esp_log.h"
 static const char* TAG = "camera";
 #endif
+
 #include "mp.h"
 static const char* CAMERA_SENSOR_NVS_KEY = "sensor";
 static const char* CAMERA_PIXFORMAT_NVS_KEY = "pixformat";
@@ -175,7 +176,7 @@ static void skip_frame()
 {
     if (s_state == NULL)
     {
-        mp_raise_msg(&mp_type_Exception, MP_ERROR_TEXT("Camera not initialized"));
+        MP_RAISE(Exception, "Camera not initialized");
     }
     
     int64_t st_t = esp_timer_get_time();
@@ -183,21 +184,21 @@ static void skip_frame()
     {
         if ((esp_timer_get_time() - st_t) > 1000000LL)
         {
-            mp_raise_msg(&mp_type_Exception, MP_ERROR_TEXT("Timeout waiting for VSYNC"));
+            MP_RAISE(Exception, "Timeout waiting for VSYNC");
         }
     }
     while (_gpio_get_level(s_state->config.pin_vsync) != 0)
     {
         if ((esp_timer_get_time() - st_t) > 1000000LL)
         {
-            mp_raise_msg(&mp_type_Exception, MP_ERROR_TEXT("Timeout waiting for VSYNC"));
+            MP_RAISE(Exception, "Timeout waiting for VSYNC");
         }
     }
     while (_gpio_get_level(s_state->config.pin_vsync) == 0)
     {
         if ((esp_timer_get_time() - st_t) > 1000000LL)
         {
-            mp_raise_msg(&mp_type_Exception, MP_ERROR_TEXT("Timeout waiting for VSYNC"));
+            MP_RAISE(Exception, "Timeout waiting for VSYNC");
         }
     }
 }
@@ -931,7 +932,6 @@ esp_err_t camera_probe(const camera_config_t* config, camera_model_t* out_camera
     MP_LOGD(TAG, "Detected camera at address=0x%02x", slv_addr);
     sensor_id_t* id = &s_state->sensor.id;
     
-#if CONFIG_OV2640_SUPPORT
     if (slv_addr == 0x30)
     {
         MP_LOGD(TAG, "Resetting OV2640");
@@ -941,33 +941,18 @@ esp_err_t camera_probe(const camera_config_t* config, camera_model_t* out_camera
         vTaskDelay(10 / portTICK_PERIOD_MS);
         slv_addr = SCCB_Probe();
     }
-#endif
     
     s_state->sensor.slv_addr = slv_addr;
     s_state->sensor.xclk_freq_hz = config->xclk_freq_hz;
     
-#if (CONFIG_OV3660_SUPPORT || CONFIG_OV5640_SUPPORT)
-    if (s_state->sensor.slv_addr == 0x3c)
-    {
-        id->PID = SCCB_Read16(s_state->sensor.slv_addr, REG16_CHIDH);
-        id->VER = SCCB_Read16(s_state->sensor.slv_addr, REG16_CHIDL);
-        vTaskDelay(10 / portTICK_PERIOD_MS);
-        MP_LOGD(TAG, "Camera PID=0x%02x VER=0x%02x", id->PID, id->VER);
-    }
-    else
-    {
-#endif
-        id->PID = SCCB_Read(s_state->sensor.slv_addr, REG_PID);
-        id->VER = SCCB_Read(s_state->sensor.slv_addr, REG_VER);
-        id->MIDL = SCCB_Read(s_state->sensor.slv_addr, REG_MIDL);
-        id->MIDH = SCCB_Read(s_state->sensor.slv_addr, REG_MIDH);
-        vTaskDelay(10 / portTICK_PERIOD_MS);
-        MP_LOGD(TAG, "Camera PID=0x%02x VER=0x%02x MIDL=0x%02x MIDH=0x%02x",
-                 id->PID, id->VER, id->MIDH, id->MIDL);
+    id->PID = SCCB_Read(s_state->sensor.slv_addr, REG_PID);
+    id->VER = SCCB_Read(s_state->sensor.slv_addr, REG_VER);
+    id->MIDL = SCCB_Read(s_state->sensor.slv_addr, REG_MIDL);
+    id->MIDH = SCCB_Read(s_state->sensor.slv_addr, REG_MIDH);
+    vTaskDelay(10 / portTICK_PERIOD_MS);
+    MP_LOGD(TAG, "Camera PID=0x%02x VER=0x%02x MIDL=0x%02x MIDH=0x%02x",
+             id->PID, id->VER, id->MIDH, id->MIDL);
                  
-#if (CONFIG_OV3660_SUPPORT || CONFIG_OV5640_SUPPORT)
-    }
-#endif
     
     
     switch (id->PID)
@@ -992,16 +977,16 @@ esp_err_t camera_probe(const camera_config_t* config, camera_model_t* out_camera
 
 
 
-static void camera_init(const camera_config_t* config)
+void esp_camera_init(const camera_config_t* config)
 {
     if (NULL == s_state)
     {
-        mp_raise_msg(&mp_type_Exception, MP_ERROR_TEXT("Camera not initialized"));
+        MP_RAISE(Exception, "Camera not initialized");
     }
     
     if (s_state->sensor.id.PID == 0)
     {
-        mp_raise_msg(&mp_type_Exception, MP_ERROR_TEXT("Camera not supported"));
+        MP_RAISE(Exception, "Camera not supported");
     }
     
     memcpy(&s_state->config, config, sizeof(*config));
@@ -1018,7 +1003,7 @@ static void camera_init(const camera_config_t* config)
             }
             break;
         default:
-            mp_raise_msg(&mp_type_Exception, MP_ERROR_TEXT("Camera not supported"));
+            MP_RAISE(Exception, "Camera not supported");
     }
     
     s_state->width  = resolution[frame_size].width;
@@ -1028,38 +1013,18 @@ static void camera_init(const camera_config_t* config)
     {
         s_state->fb_size = s_state->width * s_state->height;
         
-        if ((s_state->sensor.id.PID == OV3660_PID) ||
-            (s_state->sensor.id.PID == OV5640_PID))
+        if (is_hs_mode() && (s_state->sensor.id.PID != OV7725_PID))
         {
-            if (is_hs_mode())
-            {
-                s_state->sampling_mode = SM_0A00_0B00;
-                s_state->dma_filter    = &dma_filter_yuyv_highspeed;
-            }
-            else
-            {
-                s_state->sampling_mode = SM_0A0B_0C0D;
-                s_state->dma_filter    = &dma_filter_yuyv;
-            }
-            
-            s_state->in_bytes_per_pixel = 1;       // camera sends Y8
+            s_state->sampling_mode = SM_0A00_0B00;
+            s_state->dma_filter    = &dma_filter_grayscale_highspeed;
         }
         else
         {
-            if (is_hs_mode() && (s_state->sensor.id.PID != OV7725_PID))
-            {
-                s_state->sampling_mode = SM_0A00_0B00;
-                s_state->dma_filter    = &dma_filter_grayscale_highspeed;
-            }
-            else
-            {
-                s_state->sampling_mode = SM_0A0B_0C0D;
-                s_state->dma_filter    = &dma_filter_grayscale;
-            }
-            
-            s_state->in_bytes_per_pixel = 2;       // camera sends YU/YV
+            s_state->sampling_mode = SM_0A0B_0C0D;
+            s_state->dma_filter    = &dma_filter_grayscale;
         }
         
+        s_state->in_bytes_per_pixel = 2;       // camera sends YU/YV
         s_state->fb_bytes_per_pixel = 1;       // frame buffer stores Y8
     }
     else if ((pix_format == PIXFORMAT_YUV422) ||
@@ -1103,7 +1068,7 @@ static void camera_init(const camera_config_t* config)
             (s_state->sensor.id.PID != OV5640_PID))
         {
             esp_camera_deinit();
-            mp_raise_msg(&mp_type_Exception, MP_ERROR_TEXT("JPEG format is only supported for ov2640, ov3660 and ov5640"));
+            MP_RAISE(Exception, "JPEG format is only supported for ov2640, ov3660 and ov5640");
         }
         
         (*s_state->sensor.set_quality)(&s_state->sensor, config->jpeg_quality);
@@ -1118,7 +1083,7 @@ static void camera_init(const camera_config_t* config)
     else
     {
         esp_camera_deinit();
-        mp_raise_msg(&mp_type_Exception, MP_ERROR_TEXT("Requested format is not supported"));
+        MP_RAISE(Exception, "Requested format is not supported");
     }
     
     MP_LOGD(TAG, "in_bpp: %d, fb_bpp: %d, fb_size: %d, mode: %d, width: %d height: %d",
@@ -1131,7 +1096,7 @@ static void camera_init(const camera_config_t* config)
     if (ESP_OK != dma_desc_init())
     {
         esp_camera_deinit();
-        mp_raise_msg(&mp_type_Exception, MP_ERROR_TEXT("Failed to initialize I2S and DMA"));
+        MP_RAISE(Exception, "Failed to initialize I2S and DMA");
     }
     
     s_state->data_ready = xQueueCreate(16, sizeof(size_t));
@@ -1139,7 +1104,7 @@ static void camera_init(const camera_config_t* config)
     if (s_state->data_ready == NULL)
     {
         esp_camera_deinit();
-        mp_raise_msg(&mp_type_Exception, MP_ERROR_TEXT("Failed to dma queue"));
+        MP_RAISE(Exception, "Failed to dma queue");
     }
     
     s_state->frame_ready = xSemaphoreCreateBinary();
@@ -1147,7 +1112,7 @@ static void camera_init(const camera_config_t* config)
     if (s_state->frame_ready == NULL)
     {
         esp_camera_deinit();
-        mp_raise_msg(&mp_type_Exception, MP_ERROR_TEXT("Failed to create semaphore"));
+        MP_RAISE(Exception, "Failed to create semaphore");
     }
     
     //ToDo: core affinity?
@@ -1160,7 +1125,7 @@ static void camera_init(const camera_config_t* config)
 #endif
     {
         esp_camera_deinit();
-        mp_raise_msg(&mp_type_Exception, MP_ERROR_TEXT("Failed to create DMA filter task"));
+        MP_RAISE(Exception, "Failed to create DMA filter task");
     }
     
     vsync_intr_disable();
@@ -1171,7 +1136,7 @@ static void camera_init(const camera_config_t* config)
     {
         esp_camera_deinit();
         MP_LOGE(TAG, "gpio_install_isr_service failed (%x)", err);
-        mp_raise_msg(&mp_type_Exception, MP_ERROR_TEXT("Register GPIO service failed"));
+        MP_RAISE(Exception, "Register GPIO service failed");
     }
     
     err = gpio_isr_handler_add(s_state->config.pin_vsync, &vsync_isr, NULL);
@@ -1179,7 +1144,7 @@ static void camera_init(const camera_config_t* config)
     {
         esp_camera_deinit();
         MP_LOGE(TAG, "vsync_isr_handler_add failed (%x)", err);
-        mp_raise_msg(&mp_type_Exception, MP_ERROR_TEXT("Register ISR handler failed"));
+        MP_RAISE(Exception, "Register ISR handler failed");
     }
     
     s_state->sensor.status.framesize = frame_size;
@@ -1190,7 +1155,7 @@ static void camera_init(const camera_config_t* config)
     if (s_state->sensor.set_framesize(&s_state->sensor, frame_size) != 0)
     {
         esp_camera_deinit();
-        mp_raise_msg(&mp_type_Exception, MP_ERROR_TEXT("Failed to set frame size"));
+        MP_RAISE(Exception, "Failed to set frame size");
     }
     
     s_state->sensor.set_pixformat(&s_state->sensor, pix_format);
@@ -1206,6 +1171,8 @@ static void camera_init(const camera_config_t* config)
     skip_frame();
     
     s_state->sensor.init_status(&s_state->sensor);
+    
+    MP_LOGD(TAG, "Camera initialized as %p", s_state);
 }
 
 
@@ -1243,7 +1210,7 @@ void campy_Camera_init(struct campy_Camera* camera)
     {
         _init_skip();
         MP_LOGE(TAG, "Camera probe failed with error 0x%x", err);
-        mp_raise_msg(&mp_type_Exception, MP_ERROR_TEXT("Unable to detect camera"));
+        MP_RAISE(Exception, "Unable to detect camera");
     }
     
     
@@ -1255,19 +1222,21 @@ void campy_Camera_init(struct campy_Camera* camera)
             
         default:
             _init_skip();
-            mp_raise_msg(&mp_type_Exception, MP_ERROR_TEXT("Camera not supported"));
+            MP_RAISE(Exception, "Camera not supported");
     }
     
     
-    camera_init(&(camera->config));
+    esp_camera_init(&(camera->config));
 }
 
 
-esp_err_t esp_camera_deinit()
+void esp_camera_deinit()
 {
+    MP_LOGD(TAG, "Deinitialization of %p", s_state);
+    
     if (s_state == NULL)
     {
-        mp_raise_msg(&mp_type_Exception, MP_ERROR_TEXT("Camera not initialized"));
+        MP_RAISE(Exception, "Camera not initialized");
     }
     
     if (s_state->dma_filter_task)
@@ -1308,8 +1277,6 @@ esp_err_t esp_camera_deinit()
     
     camera_disable_out_clock();
     periph_module_disable(PERIPH_I2S0_MODULE);
-    
-    return ESP_OK;
 }
 
 #define FB_GET_TIMEOUT (4000 / portTICK_PERIOD_MS)
@@ -1321,7 +1288,7 @@ struct campy_FrameBuffer* esp_camera_fb_get()
      */
     if (s_state == NULL)
     {
-        mp_raise_msg(&mp_type_Exception, MP_ERROR_TEXT("Camera not initialized"));
+        MP_RAISE(Exception, "Camera not initialized");
     }
     
     /*
@@ -1339,7 +1306,7 @@ struct campy_FrameBuffer* esp_camera_fb_get()
          */
         if (i2s_run())
         {
-            mp_raise_msg(&mp_type_Exception, MP_ERROR_TEXT("Transfer error"));
+            MP_RAISE(Exception, "Transfer error");
         }
     }
     
@@ -1351,7 +1318,7 @@ struct campy_FrameBuffer* esp_camera_fb_get()
     if (xSemaphoreTake(s_state->frame_ready, FB_GET_TIMEOUT) != pdTRUE)
     {
         i2s_stop(&need_yield);
-        mp_raise_msg(&mp_type_Exception, MP_ERROR_TEXT("Failed to get the frame on time"));
+        MP_RAISE(Exception, "Failed to get the frame on time");
     }
     
     return s_state->fb;
@@ -1361,120 +1328,17 @@ sensor_t* esp_camera_sensor_get()
 {
     if (s_state == NULL)
     {
-        mp_raise_msg(&mp_type_Exception, MP_ERROR_TEXT("Camera not initialized"));
+        MP_RAISE(Exception, "Camera not initialized");
     }
     
     return &s_state->sensor;
-}
-
-esp_err_t esp_camera_save_to_nvs(const char* key)
-{
-#if ESP_IDF_VERSION_MAJOR > 3
-    nvs_handle_t handle;
-#else
-    nvs_handle handle;
-#endif
-    esp_err_t ret = nvs_open(key, NVS_READWRITE, &handle);
-    
-    if (ret == ESP_OK)
-    {
-        sensor_t* s = esp_camera_sensor_get();
-        if (s != NULL)
-        {
-            ret = nvs_set_blob(handle, CAMERA_SENSOR_NVS_KEY, &s->status, sizeof(camera_status_t));
-            if (ret == ESP_OK)
-            {
-                uint8_t pf = s->pixformat;
-                ret = nvs_set_u8(handle, CAMERA_PIXFORMAT_NVS_KEY, pf);
-            }
-            return ret;
-        }
-        else
-        {
-            return ESP_ERR_CAMERA_NOT_DETECTED;
-        }
-        nvs_close(handle);
-        return ret;
-    }
-    else
-    {
-        return ret;
-    }
-}
-
-esp_err_t esp_camera_load_from_nvs(const char* key)
-{
-#if ESP_IDF_VERSION_MAJOR > 3
-    nvs_handle_t handle;
-#else
-    nvs_handle handle;
-#endif
-    uint8_t pf;
-    
-    esp_err_t ret = nvs_open(key, NVS_READWRITE, &handle);
-    
-    if (ret == ESP_OK)
-    {
-        sensor_t* s = esp_camera_sensor_get();
-        camera_status_t st;
-        if (s != NULL)
-        {
-            size_t size = sizeof(camera_status_t);
-            ret = nvs_get_blob(handle, CAMERA_SENSOR_NVS_KEY, &st, &size);
-            if (ret == ESP_OK)
-            {
-                s->set_ae_level(s, st.ae_level);
-                s->set_aec2(s, st.aec2);
-                s->set_aec_value(s, st.aec_value);
-                s->set_agc_gain(s, st.agc_gain);
-                s->set_awb_gain(s, st.awb_gain);
-                s->set_bpc(s, st.bpc);
-                s->set_brightness(s, st.brightness);
-                s->set_colorbar(s, st.colorbar);
-                s->set_contrast(s, st.contrast);
-                s->set_dcw(s, st.dcw);
-                s->set_denoise(s, st.denoise);
-                s->set_exposure_ctrl(s, st.aec);
-                s->set_framesize(s, st.framesize);
-                s->set_gain_ctrl(s, st.agc);
-                s->set_gainceiling(s, st.gainceiling);
-                s->set_hmirror(s, st.hmirror);
-                s->set_lenc(s, st.lenc);
-                s->set_quality(s, st.quality);
-                s->set_raw_gma(s, st.raw_gma);
-                s->set_saturation(s, st.saturation);
-                s->set_sharpness(s, st.sharpness);
-                s->set_special_effect(s, st.special_effect);
-                s->set_vflip(s, st.vflip);
-                s->set_wb_mode(s, st.wb_mode);
-                s->set_whitebal(s, st.awb);
-                s->set_wpc(s, st.wpc);
-            }
-            ret = nvs_get_u8(handle, CAMERA_PIXFORMAT_NVS_KEY, &pf);
-            if (ret == ESP_OK)
-            {
-                s->set_pixformat(s, pf);
-            }
-        }
-        else
-        {
-            return ESP_ERR_CAMERA_NOT_DETECTED;
-        }
-        nvs_close(handle);
-        return ret;
-    }
-    else
-    {
-        MP_LOGW(TAG, "Error (%d) opening nvs key \"%s\"", ret, key);
-        return ret;
-    }
 }
 
 
 /*
  * See description with declaration
  */
-extern struct campy_Camera* campy_Camera_new(const camera_config_t* aConfig)
+struct campy_Camera* campy_Camera_new(const camera_config_t* aConfig)
 {
     struct campy_Camera* self = m_new_obj(struct campy_Camera);
     
@@ -1492,7 +1356,7 @@ struct campy_FrameBuffer* campy_FrameBuffer_new(void)
 {
     if (NULL == s_state)
     {
-        mp_raise_msg(&mp_type_Exception, MP_ERROR_TEXT("Camera not initialized"));
+        MP_RAISE(Exception, "Camera not initialized");
     }
     
     struct campy_FrameBuffer* self = m_new0(struct campy_FrameBuffer, 1);

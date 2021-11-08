@@ -51,3 +51,13 @@ extern "C" {
 #define MP_NORMAL(COLOR) "\033[0;" MP_COLOR_##COLOR "m"
 #define MP_BOLD(COLOR)   "\033[1;" MP_COLOR_##COLOR "m"
 #define MP_DEFAULT       "\033[0m"
+
+#define MP_RAISE(_exc_, _txt_) \
+    do \
+    { \
+        MP_LOGE(TAG, _txt_); \
+        mp_raise_msg(&mp_type_##_exc_, MP_ERROR_TEXT(_txt_)); \
+    } \
+    while (0 == 1)
+
+

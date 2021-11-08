@@ -79,13 +79,14 @@ typedef struct
 #define ESP_ERR_CAMERA_NOT_SUPPORTED            (ESP_ERR_CAMERA_BASE + 4)
 
 /**
- * @brief Deinitialize the camera driver
- *
- * @return
- *      - ESP_OK on success
- *      - ESP_ERR_INVALID_STATE if the driver hasn't been initialized yet
+ * @brief Initialize the camera driver
  */
-esp_err_t esp_camera_deinit();
+void esp_camera_init(const camera_config_t* config);
+
+/**
+ * @brief Deinitialize the camera driver
+ */
+void esp_camera_deinit();
 
 /**
  * @brief Get a pointer to the image sensor control structure
