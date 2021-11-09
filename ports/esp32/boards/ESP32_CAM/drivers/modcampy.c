@@ -12,6 +12,8 @@
 #include "mp.h"
 #include <stdarg.h>
 #include <string.h>
+#include <float.h>
+#include <stdbool.h>
 
 
 /**
@@ -197,10 +199,36 @@ STATIC pixformat_t _qstr2format(mp_obj_t aStr)
 }
 
 
-STATIC int _camclamp(mp_float_t aVal)
+STATIC int _denorm_clamp(mp_obj_t aVal,
+                         int      aMin,
+                         int      aMax)
 {
-    int nv = (int)(aVal * 2.0 + 0.5F);
-    return (nv > 2) ? 2 : (nv < -2) ? -2 : nv;
+    mp_float_t val  = mp_obj_get_float(aVal);
+    int        fmin = abs(aMin);
+    int        fmax = abs(aMax);
+    int        fact = (fmin > fmax) ? fmin : fmax;
+    int        nv   = (int)(val * fact + 0.5F);
+    return (nv > aMax) ? aMax : (nv < aMin) ? aMin : nv;
+}
+
+
+STATIC mp_obj_t _norm_clamp(int  aVal,
+                            int  aMin,
+                            int  aMax,
+                            bool dual)
+{
+    aVal                         = (aVal > aMax) ? aMax : (aVal < aMin) ? aMin : aVal;
+    int                     fmin = abs(aMin);
+    int                     fmax = abs(aMax);
+    int                     fact = (fmin > fmax) ? fmin : fmax;
+    mp_float_t              nv   = (mp_float_t)aVal / (mp_float_t)fact;
+    
+    if (dual && (0.0 == nv))
+    {
+        nv = FLT_MIN; /* Float shall never be 0 for dual types */
+    }
+    
+    return mp_obj_new_float(nv);
 }
 
 
@@ -434,7 +462,7 @@ STATIC void MP_NAMESPACE3(campy__Camera, frame_size, __store__)(mp_obj_t  aSelf,
 STATIC mp_obj_t MP_NAMESPACE3(campy__Camera, contrast, __load__)(mp_obj_t  aSelf)
 {
     struct campy_Camera* self = _get_camera(aSelf);
-    return mp_obj_new_float((mp_float_t)(self->sensor->status.contrast) / 2);
+    return _norm_clamp(self->sensor->status.contrast, -2, 2, false);
 }
 
 
@@ -442,14 +470,14 @@ STATIC void MP_NAMESPACE3(campy__Camera, contrast, __store__)(mp_obj_t  aSelf,
                                                               mp_obj_t  aWhat)
 {
     struct campy_Camera* self = _get_camera(aSelf);
-    self->sensor->set_contrast(self->sensor, _camclamp(mp_obj_get_float(aWhat)));
+    self->sensor->set_contrast(self->sensor, _denorm_clamp(aWhat, -2, 2));
 }
 
 
 STATIC mp_obj_t MP_NAMESPACE3(campy__Camera, brightness, __load__)(mp_obj_t  aSelf)
 {
     struct campy_Camera* self = _get_camera(aSelf);
-    return mp_obj_new_float((mp_float_t)(self->sensor->status.brightness) / 2);
+    return _norm_clamp(self->sensor->status.brightness, -2, 2, false);
 }
 
 
@@ -457,14 +485,14 @@ STATIC void MP_NAMESPACE3(campy__Camera, brightness, __store__)(mp_obj_t  aSelf,
                                                                 mp_obj_t  aWhat)
 {
     struct campy_Camera* self = _get_camera(aSelf);
-    self->sensor->set_brightness(self->sensor, _camclamp(mp_obj_get_float(aWhat)));
+    self->sensor->set_brightness(self->sensor, _denorm_clamp(aWhat, -2, 2));
 }
 
 
 STATIC mp_obj_t MP_NAMESPACE3(campy__Camera, saturation, __load__)(mp_obj_t  aSelf)
 {
     struct campy_Camera* self = _get_camera(aSelf);
-    return mp_obj_new_float((mp_float_t)(self->sensor->status.saturation) / 2);
+    return _norm_clamp(self->sensor->status.saturation, -2, 2, false);
 }
 
 
@@ -472,22 +500,53 @@ STATIC void MP_NAMESPACE3(campy__Camera, saturation, __store__)(mp_obj_t  aSelf,
                                                                 mp_obj_t  aWhat)
 {
     struct campy_Camera* self = _get_camera(aSelf);
-    self->sensor->set_saturation(self->sensor, _camclamp(mp_obj_get_float(aWhat)));
+    self->sensor->set_saturation(self->sensor, _denorm_clamp(aWhat, -2, 2));
 }
 
 
-STATIC mp_obj_t MP_NAMESPACE3(campy__Camera, exposure, __load__)(mp_obj_t  aSelf)
+STATIC mp_obj_t MP_NAMESPACE3(campy__Camera, ae_level, __load__)(mp_obj_t aSelf)
 {
     struct campy_Camera* self = _get_camera(aSelf);
-    return mp_obj_new_float((mp_float_t)(self->sensor->status.ae_level) / 2);
+    return _norm_clamp(self->sensor->status.ae_level, -2, 2, false);
 }
 
 
-STATIC void MP_NAMESPACE3(campy__Camera, exposure, __store__)(mp_obj_t  aSelf,
+STATIC void MP_NAMESPACE3(campy__Camera, ae_level, __store__)(mp_obj_t  aSelf,
                                                               mp_obj_t  aWhat)
 {
     struct campy_Camera* self = _get_camera(aSelf);
-    self->sensor->set_ae_level(self->sensor, _camclamp(mp_obj_get_float(aWhat)));
+    self->sensor->set_ae_level(self->sensor, _denorm_clamp(aWhat, -2, 2));
+}
+
+
+STATIC mp_obj_t MP_NAMESPACE3(campy__Camera, agc, __load__)(mp_obj_t  aSelf)
+{
+    struct campy_Camera* self = _get_camera(aSelf);
+    
+    if (self->sensor->status.agc)
+    {
+        return _norm_clamp(self->sensor->status.ae_level, 0, 30, true);
+    }
+    else
+    {
+        return mp_const_false;
+    }
+}
+
+
+STATIC void MP_NAMESPACE3(campy__Camera, agc, __store__)(mp_obj_t  aSelf,
+                                                         mp_obj_t  aWhat)
+{
+    struct campy_Camera* self = _get_camera(aSelf);
+    
+    if (mp_obj_is_bool(aWhat))
+    {
+        self->sensor->set_gain_ctrl(self->sensor, mp_obj_is_true(aWhat));
+    }
+    else
+    {
+        self->sensor->set_agc_gain(self->sensor, _denorm_clamp(aWhat, 0, 30));
+    }
 }
 
 
@@ -513,7 +572,8 @@ STATIC void MP_NAMESPACE3(campy, Camera, __attr__)(mp_obj_t  aSelf,
         MP_ATTR_PROPERTY(     campy, Camera, contrast     )
         MP_ATTR_PROPERTY(     campy, Camera, brightness   )
         MP_ATTR_PROPERTY(     campy, Camera, saturation   )
-        MP_ATTR_PROPERTY(     campy, Camera, exposure     )
+        MP_ATTR_PROPERTY(     campy, Camera, ae_level     )
+        MP_ATTR_PROPERTY(     campy, Camera, agc          )
     }
     MP_STORE
     {
@@ -522,7 +582,8 @@ STATIC void MP_NAMESPACE3(campy, Camera, __attr__)(mp_obj_t  aSelf,
         MP_ATTR_PROPERTY_SET( campy, Camera, contrast     )
         MP_ATTR_PROPERTY_SET( campy, Camera, brightness   )
         MP_ATTR_PROPERTY_SET( campy, Camera, saturation   )
-        MP_ATTR_PROPERTY_SET( campy, Camera, exposure     )
+        MP_ATTR_PROPERTY_SET( campy, Camera, ae_level     )
+        MP_ATTR_PROPERTY_SET( campy, Camera, agc          )
     }
 }
 
