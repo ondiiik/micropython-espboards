@@ -199,36 +199,12 @@ STATIC pixformat_t _qstr2format(mp_obj_t aStr)
 }
 
 
-STATIC int _denorm_clamp(mp_obj_t aVal,
-                         int      aMin,
-                         int      aMax)
+STATIC int _clamp(mp_obj_t aVal,
+                  mp_int_t aMin,
+                  mp_int_t aMax)
 {
-    mp_float_t val  = mp_obj_get_float(aVal);
-    int        fmin = abs(aMin);
-    int        fmax = abs(aMax);
-    int        fact = (fmin > fmax) ? fmin : fmax;
-    int        nv   = (int)(val * fact + 0.5F);
-    return (nv > aMax) ? aMax : (nv < aMin) ? aMin : nv;
-}
-
-
-STATIC mp_obj_t _norm_clamp(int  aVal,
-                            int  aMin,
-                            int  aMax,
-                            bool dual)
-{
-    aVal                         = (aVal > aMax) ? aMax : (aVal < aMin) ? aMin : aVal;
-    int                     fmin = abs(aMin);
-    int                     fmax = abs(aMax);
-    int                     fact = (fmin > fmax) ? fmin : fmax;
-    mp_float_t              nv   = (mp_float_t)aVal / (mp_float_t)fact;
-    
-    if (dual && (0.0 == nv))
-    {
-        nv = FLT_MIN; /* Float shall never be 0 for dual types */
-    }
-    
-    return mp_obj_new_float(nv);
+    mp_int_t val = mp_obj_get_int(aVal);
+    return (val > aMax) ? aMax : (val < aMin) ? aMin : val;
 }
 
 
@@ -415,28 +391,16 @@ STATIC mp_obj_t MP_NAMESPACE3(campy__Camera, model, __load__)(mp_obj_t  aSelf)
 STATIC mp_obj_t MP_NAMESPACE3(campy__Camera, jpeg_quality, __load__)(mp_obj_t aSelf)
 {
     struct campy_Camera* self = _get_camera(aSelf);
-    return MP_OBJ_NEW_SMALL_INT(self->config.jpeg_quality);
+    return MP_OBJ_NEW_SMALL_INT(self->sensor->status.quality);
 }
 
 
 
-STATIC mp_obj_t MP_NAMESPACE3(campy__Camera, jpeg_quality, __store__)(mp_obj_t aSelf,
-                                                                      mp_obj_t aWhat)
+STATIC void MP_NAMESPACE3(campy__Camera, jpeg_quality, __store__)(mp_obj_t aSelf,
+                                                                  mp_obj_t aWhat)
 {
     struct campy_Camera* self = _get_camera(aSelf);
-    
-    if (PIXFORMAT_JPEG != self->config.pixel_format)
-    {
-        MP_RAISE(Exception, "quality can be set only for JPEG");
-    }
-    
-    int q = mp_obj_get_float(aWhat) * 60 + 4;
-    
-    esp_camera_deinit();
-    self->config.jpeg_quality = (q < 4) ? 4 : (q > 64) ? 64 : q;
-    campy_Camera_init(self);
-    
-    return mp_const_none;
+    self->sensor->set_quality(self->sensor, _clamp(aWhat, 4, 64));
 }
 
 
@@ -462,7 +426,7 @@ STATIC void MP_NAMESPACE3(campy__Camera, frame_size, __store__)(mp_obj_t  aSelf,
 STATIC mp_obj_t MP_NAMESPACE3(campy__Camera, contrast, __load__)(mp_obj_t  aSelf)
 {
     struct campy_Camera* self = _get_camera(aSelf);
-    return _norm_clamp(self->sensor->status.contrast, -2, 2, false);
+    return MP_OBJ_NEW_SMALL_INT(self->sensor->status.contrast);
 }
 
 
@@ -470,14 +434,14 @@ STATIC void MP_NAMESPACE3(campy__Camera, contrast, __store__)(mp_obj_t  aSelf,
                                                               mp_obj_t  aWhat)
 {
     struct campy_Camera* self = _get_camera(aSelf);
-    self->sensor->set_contrast(self->sensor, _denorm_clamp(aWhat, -2, 2));
+    self->sensor->set_contrast(self->sensor, _clamp(aWhat, -2, 2));
 }
 
 
 STATIC mp_obj_t MP_NAMESPACE3(campy__Camera, brightness, __load__)(mp_obj_t  aSelf)
 {
     struct campy_Camera* self = _get_camera(aSelf);
-    return _norm_clamp(self->sensor->status.brightness, -2, 2, false);
+    return MP_OBJ_NEW_SMALL_INT(self->sensor->status.brightness);
 }
 
 
@@ -485,14 +449,14 @@ STATIC void MP_NAMESPACE3(campy__Camera, brightness, __store__)(mp_obj_t  aSelf,
                                                                 mp_obj_t  aWhat)
 {
     struct campy_Camera* self = _get_camera(aSelf);
-    self->sensor->set_brightness(self->sensor, _denorm_clamp(aWhat, -2, 2));
+    self->sensor->set_brightness(self->sensor, _clamp(aWhat, -2, 2));
 }
 
 
 STATIC mp_obj_t MP_NAMESPACE3(campy__Camera, saturation, __load__)(mp_obj_t  aSelf)
 {
     struct campy_Camera* self = _get_camera(aSelf);
-    return _norm_clamp(self->sensor->status.saturation, -2, 2, false);
+    return MP_OBJ_NEW_SMALL_INT(self->sensor->status.saturation);
 }
 
 
@@ -500,14 +464,14 @@ STATIC void MP_NAMESPACE3(campy__Camera, saturation, __store__)(mp_obj_t  aSelf,
                                                                 mp_obj_t  aWhat)
 {
     struct campy_Camera* self = _get_camera(aSelf);
-    self->sensor->set_saturation(self->sensor, _denorm_clamp(aWhat, -2, 2));
+    self->sensor->set_saturation(self->sensor, _clamp(aWhat, -2, 2));
 }
 
 
 STATIC mp_obj_t MP_NAMESPACE3(campy__Camera, ae_level, __load__)(mp_obj_t aSelf)
 {
     struct campy_Camera* self = _get_camera(aSelf);
-    return _norm_clamp(self->sensor->status.ae_level, -2, 2, false);
+    return MP_OBJ_NEW_SMALL_INT(self->sensor->status.ae_level);
 }
 
 
@@ -515,22 +479,14 @@ STATIC void MP_NAMESPACE3(campy__Camera, ae_level, __store__)(mp_obj_t  aSelf,
                                                               mp_obj_t  aWhat)
 {
     struct campy_Camera* self = _get_camera(aSelf);
-    self->sensor->set_ae_level(self->sensor, _denorm_clamp(aWhat, -2, 2));
+    self->sensor->set_ae_level(self->sensor, _clamp(aWhat, -2, 2));
 }
 
 
 STATIC mp_obj_t MP_NAMESPACE3(campy__Camera, agc, __load__)(mp_obj_t  aSelf)
 {
     struct campy_Camera* self = _get_camera(aSelf);
-    
-    if (self->sensor->status.agc)
-    {
-        return _norm_clamp(self->sensor->status.ae_level, 0, 30, true);
-    }
-    else
-    {
-        return mp_const_false;
-    }
+    return self->sensor->status.agc ? mp_const_true : mp_const_false;
 }
 
 
@@ -538,22 +494,223 @@ STATIC void MP_NAMESPACE3(campy__Camera, agc, __store__)(mp_obj_t  aSelf,
                                                          mp_obj_t  aWhat)
 {
     struct campy_Camera* self = _get_camera(aSelf);
-    
-    if (mp_obj_is_bool(aWhat))
-    {
-        self->sensor->set_gain_ctrl(self->sensor, mp_obj_is_true(aWhat));
-    }
-    else
-    {
-        self->sensor->set_agc_gain(self->sensor, _denorm_clamp(aWhat, 0, 30));
-    }
+    self->sensor->set_gain_ctrl(self->sensor, mp_obj_is_true(aWhat));
+}
+
+
+STATIC mp_obj_t MP_NAMESPACE3(campy__Camera, agc_gain, __load__)(mp_obj_t aSelf)
+{
+    struct campy_Camera* self = _get_camera(aSelf);
+    return MP_OBJ_NEW_SMALL_INT(self->sensor->status.agc_gain);
+}
+
+
+STATIC void MP_NAMESPACE3(campy__Camera, agc_gain, __store__)(mp_obj_t  aSelf,
+                                                              mp_obj_t  aWhat)
+{
+    struct campy_Camera* self = _get_camera(aSelf);
+    self->sensor->set_agc_gain(self->sensor, _clamp(aWhat, 0, 30));
+}
+
+
+STATIC mp_obj_t MP_NAMESPACE3(campy__Camera, gainceiling, __load__)(mp_obj_t aSelf)
+{
+    struct campy_Camera* self = _get_camera(aSelf);
+    return MP_OBJ_NEW_SMALL_INT(self->sensor->status.gainceiling);
+}
+
+
+STATIC void MP_NAMESPACE3(campy__Camera, gainceiling, __store__)(mp_obj_t  aSelf,
+                                                                 mp_obj_t  aWhat)
+{
+    struct campy_Camera* self = _get_camera(aSelf);
+    self->sensor->set_gainceiling(self->sensor, _clamp(aWhat, 0, 6));
+}
+
+
+STATIC mp_obj_t MP_NAMESPACE3(campy__Camera, aec, __load__)(mp_obj_t  aSelf)
+{
+    struct campy_Camera* self = _get_camera(aSelf);
+    return self->sensor->status.aec ? mp_const_true : mp_const_false;
+}
+
+
+STATIC void MP_NAMESPACE3(campy__Camera, aec, __store__)(mp_obj_t  aSelf,
+                                                         mp_obj_t  aWhat)
+{
+    struct campy_Camera* self = _get_camera(aSelf);
+    self->sensor->set_exposure_ctrl(self->sensor, mp_obj_is_true(aWhat));
+}
+
+
+STATIC mp_obj_t MP_NAMESPACE3(campy__Camera, aec2, __load__)(mp_obj_t  aSelf)
+{
+    struct campy_Camera* self = _get_camera(aSelf);
+    return self->sensor->status.aec2 ? mp_const_true : mp_const_false;
+}
+
+
+STATIC void MP_NAMESPACE3(campy__Camera, aec2, __store__)(mp_obj_t  aSelf,
+                                                         mp_obj_t  aWhat)
+{
+    struct campy_Camera* self = _get_camera(aSelf);
+    self->sensor->set_aec2(self->sensor, mp_obj_is_true(aWhat));
+}
+
+
+STATIC mp_obj_t MP_NAMESPACE3(campy__Camera, aec_value, __load__)(mp_obj_t aSelf)
+{
+    struct campy_Camera* self = _get_camera(aSelf);
+    return MP_OBJ_NEW_SMALL_INT(self->sensor->status.aec_value);
+}
+
+
+STATIC void MP_NAMESPACE3(campy__Camera, aec_value, __store__)(mp_obj_t  aSelf,
+                                                               mp_obj_t  aWhat)
+{
+    struct campy_Camera* self = _get_camera(aSelf);
+    self->sensor->set_aec_value(self->sensor, _clamp(aWhat, 0, 1200));
+}
+
+
+STATIC mp_obj_t MP_NAMESPACE3(campy__Camera, hmirror, __load__)(mp_obj_t  aSelf)
+{
+    struct campy_Camera* self = _get_camera(aSelf);
+    return self->sensor->status.hmirror ? mp_const_true : mp_const_false;
+}
+
+
+STATIC void MP_NAMESPACE3(campy__Camera, hmirror, __store__)(mp_obj_t  aSelf,
+                                                         mp_obj_t  aWhat)
+{
+    struct campy_Camera* self = _get_camera(aSelf);
+    self->sensor->set_hmirror(self->sensor, mp_obj_is_true(aWhat));
+}
+
+
+STATIC mp_obj_t MP_NAMESPACE3(campy__Camera, vflip, __load__)(mp_obj_t  aSelf)
+{
+    struct campy_Camera* self = _get_camera(aSelf);
+    return self->sensor->status.vflip ? mp_const_true : mp_const_false;
+}
+
+
+STATIC void MP_NAMESPACE3(campy__Camera, vflip, __store__)(mp_obj_t  aSelf,
+                                                         mp_obj_t  aWhat)
+{
+    struct campy_Camera* self = _get_camera(aSelf);
+    self->sensor->set_vflip(self->sensor, mp_obj_is_true(aWhat));
+}
+
+
+STATIC mp_obj_t MP_NAMESPACE3(campy__Camera, lenc, __load__)(mp_obj_t  aSelf)
+{
+    struct campy_Camera* self = _get_camera(aSelf);
+    return self->sensor->status.lenc ? mp_const_true : mp_const_false;
+}
+
+
+STATIC void MP_NAMESPACE3(campy__Camera, lenc, __store__)(mp_obj_t  aSelf,
+                                                          mp_obj_t  aWhat)
+{
+    struct campy_Camera* self = _get_camera(aSelf);
+    self->sensor->set_lenc(self->sensor, mp_obj_is_true(aWhat));
+}
+
+
+STATIC mp_obj_t MP_NAMESPACE3(campy__Camera, dcw, __load__)(mp_obj_t  aSelf)
+{
+    struct campy_Camera* self = _get_camera(aSelf);
+    return self->sensor->status.dcw ? mp_const_true : mp_const_false;
+}
+
+
+STATIC void MP_NAMESPACE3(campy__Camera, dcw, __store__)(mp_obj_t  aSelf,
+                                                          mp_obj_t  aWhat)
+{
+    struct campy_Camera* self = _get_camera(aSelf);
+    self->sensor->set_dcw(self->sensor, mp_obj_is_true(aWhat));
+}
+
+
+STATIC mp_obj_t MP_NAMESPACE3(campy__Camera, bpc, __load__)(mp_obj_t  aSelf)
+{
+    struct campy_Camera* self = _get_camera(aSelf);
+    return self->sensor->status.bpc ? mp_const_true : mp_const_false;
+}
+
+
+STATIC void MP_NAMESPACE3(campy__Camera, bpc, __store__)(mp_obj_t  aSelf,
+                                                          mp_obj_t  aWhat)
+{
+    struct campy_Camera* self = _get_camera(aSelf);
+    self->sensor->set_bpc(self->sensor, mp_obj_is_true(aWhat));
+}
+
+
+STATIC mp_obj_t MP_NAMESPACE3(campy__Camera, wpc, __load__)(mp_obj_t  aSelf)
+{
+    struct campy_Camera* self = _get_camera(aSelf);
+    return self->sensor->status.wpc ? mp_const_true : mp_const_false;
+}
+
+
+STATIC void MP_NAMESPACE3(campy__Camera, wpc, __store__)(mp_obj_t  aSelf,
+                                                          mp_obj_t  aWhat)
+{
+    struct campy_Camera* self = _get_camera(aSelf);
+    self->sensor->set_wpc(self->sensor, mp_obj_is_true(aWhat));
+}
+
+
+STATIC mp_obj_t MP_NAMESPACE3(campy__Camera, awb, __load__)(mp_obj_t  aSelf)
+{
+    struct campy_Camera* self = _get_camera(aSelf);
+    return self->sensor->status.awb ? mp_const_true : mp_const_false;
+}
+
+
+STATIC void MP_NAMESPACE3(campy__Camera, awb, __store__)(mp_obj_t  aSelf,
+                                                          mp_obj_t  aWhat)
+{
+    struct campy_Camera* self = _get_camera(aSelf);
+    self->sensor->set_whitebal(self->sensor, mp_obj_is_true(aWhat));
+}
+
+
+STATIC mp_obj_t MP_NAMESPACE3(campy__Camera, awb_gain, __load__)(mp_obj_t  aSelf)
+{
+    struct campy_Camera* self = _get_camera(aSelf);
+    return self->sensor->status.awb_gain ? mp_const_true : mp_const_false;
+}
+
+
+STATIC void MP_NAMESPACE3(campy__Camera, awb_gain, __store__)(mp_obj_t  aSelf,
+                                                          mp_obj_t  aWhat)
+{
+    struct campy_Camera* self = _get_camera(aSelf);
+    self->sensor->set_awb_gain(self->sensor, mp_obj_is_true(aWhat));
+}
+
+
+STATIC mp_obj_t MP_NAMESPACE3(campy__Camera, raw_gma, __load__)(mp_obj_t  aSelf)
+{
+    struct campy_Camera* self = _get_camera(aSelf);
+    return self->sensor->status.raw_gma ? mp_const_true : mp_const_false;
+}
+
+
+STATIC void MP_NAMESPACE3(campy__Camera, raw_gma, __store__)(mp_obj_t  aSelf,
+                                                          mp_obj_t  aWhat)
+{
+    struct campy_Camera* self = _get_camera(aSelf);
+    self->sensor->set_raw_gma(self->sensor, mp_obj_is_true(aWhat));
 }
 
 
 
 MP_FN_1(campy__Camera, capture, aSelf)
 {
-    struct campy_Camera* self = _get_camera(aSelf);
     return (mp_obj_t)esp_camera_fb_get();
 }
 
@@ -574,6 +731,20 @@ STATIC void MP_NAMESPACE3(campy, Camera, __attr__)(mp_obj_t  aSelf,
         MP_ATTR_PROPERTY(     campy, Camera, saturation   )
         MP_ATTR_PROPERTY(     campy, Camera, ae_level     )
         MP_ATTR_PROPERTY(     campy, Camera, agc          )
+        MP_ATTR_PROPERTY(     campy, Camera, agc_gain     )
+        MP_ATTR_PROPERTY(     campy, Camera, gainceiling  )
+        MP_ATTR_PROPERTY(     campy, Camera, aec          )
+        MP_ATTR_PROPERTY(     campy, Camera, aec2         )
+        MP_ATTR_PROPERTY(     campy, Camera, aec_value    )
+        MP_ATTR_PROPERTY(     campy, Camera, hmirror      )
+        MP_ATTR_PROPERTY(     campy, Camera, vflip        )
+        MP_ATTR_PROPERTY(     campy, Camera, lenc         )
+        MP_ATTR_PROPERTY(     campy, Camera, dcw          )
+        MP_ATTR_PROPERTY(     campy, Camera, bpc          )
+        MP_ATTR_PROPERTY(     campy, Camera, wpc          )
+        MP_ATTR_PROPERTY(     campy, Camera, awb          )
+        MP_ATTR_PROPERTY(     campy, Camera, awb_gain     )
+        MP_ATTR_PROPERTY(     campy, Camera, raw_gma      )
     }
     MP_STORE
     {
@@ -584,6 +755,20 @@ STATIC void MP_NAMESPACE3(campy, Camera, __attr__)(mp_obj_t  aSelf,
         MP_ATTR_PROPERTY_SET( campy, Camera, saturation   )
         MP_ATTR_PROPERTY_SET( campy, Camera, ae_level     )
         MP_ATTR_PROPERTY_SET( campy, Camera, agc          )
+        MP_ATTR_PROPERTY_SET( campy, Camera, agc_gain     )
+        MP_ATTR_PROPERTY_SET( campy, Camera, gainceiling  )
+        MP_ATTR_PROPERTY_SET( campy, Camera, aec          )
+        MP_ATTR_PROPERTY_SET( campy, Camera, aec2         )
+        MP_ATTR_PROPERTY_SET( campy, Camera, aec_value    )
+        MP_ATTR_PROPERTY_SET( campy, Camera, hmirror      )
+        MP_ATTR_PROPERTY_SET( campy, Camera, vflip        )
+        MP_ATTR_PROPERTY_SET( campy, Camera, lenc         )
+        MP_ATTR_PROPERTY_SET( campy, Camera, dcw          )
+        MP_ATTR_PROPERTY_SET( campy, Camera, bpc          )
+        MP_ATTR_PROPERTY_SET( campy, Camera, wpc          )
+        MP_ATTR_PROPERTY_SET( campy, Camera, awb          )
+        MP_ATTR_PROPERTY_SET( campy, Camera, awb_gain     )
+        MP_ATTR_PROPERTY_SET( campy, Camera, raw_gma      )
     }
 }
 
